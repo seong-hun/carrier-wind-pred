@@ -1,7 +1,12 @@
 import os
+import random
 import numpy as np
 from scipy import interpolate
 import pickle as pkl
+from tqdm import tqdm, trange
+
+import torch
+from torch.utils.data import Dataset
 
 import tmc
 from tmc.terrain import Terrain
@@ -53,7 +58,8 @@ class WindUpdraft:
         h = -pos[2] - self._get_base_height(x, y)
         xc, yc = self._get_center(h)
         w = self._get_w(x, y, h, xc, yc, zi=self.zi, wast=self.wast, A=self.A)
-        return np.vstack((0, 0, -w))
+        basevel = self.basewind.get(pos)
+        return np.vstack((0, 0, -w)) + basevel
 
     def _get_base_height(self, x, y):
         h = 0
@@ -104,11 +110,14 @@ class WindUpdraft:
 
 
 def preprocess_dataset():
-    for i in range(args.FILENUM):
-        # Terrain
-        terrain = Terrain()
+    # Terrain
+    terrain = Terrain()
 
-        # Map
+    PIXSIZE = 2 * args.MAPSIZE / (args.GRIDSIZE - 1)
+    hlist = np.linspace(200, 500, args.FRAMENUM)  # frame
+
+    for file_id in trange(args.VIDEONUM):
+        # Map (random location)
         maploc = np.random.rand(2) * 2 * args.MAPSIZE
         xlim = maploc[0] + np.array((-args.MAPSIZE, args.MAPSIZE))
         ylim = maploc[1] + np.array((-args.MAPSIZE, args.MAPSIZE))
@@ -117,36 +126,101 @@ def preprocess_dataset():
         xmap, ymap = np.meshgrid(xgrid, ygrid)
         A = float(np.diff(xlim) * np.diff(ylim))
 
-        # Wind
+        # Wind (random base velocity, and random updraft center)
         basewindvel = np.random.randn(2) * 9
         basewind = WindShear(*basewindvel)
+        center = maploc + 0.2 * np.random.randn(2) * args.MAPSIZE
         wind = WindUpdraft(A=A, basewind=basewind, terrain=terrain)
 
-        hlist = [200, 250, 300, 350, 400]
-        hmap = np.zeros_like(xmap)
-        wmap = np.zeros((len(hlist),) + xmap.shape)
-        for i, j in np.ndindex(xmap.shape):
-            x = xmap[i, j]
-            y = ymap[i, j]
-            terrain_h = terrain.get_height(x, y)
-            hmap[i, j] = terrain_h
+        frames = np.zeros(hlist.shape + (4, ) + xmap.shape)  # [K, C, W, H]
+        landmarks = np.zeros(hlist.shape + (4, ) + xmap.shape)  # [K, C, W, H]
 
-            for k, h in enumerate(hlist):
+        for k, h in enumerate(hlist):
+            r = np.random.rand()
+            d = (1 - r) * center[0] + r * center[1]
+            for i, j in np.ndindex(xmap.shape):
+                x = xmap[i, j]
+                y = ymap[i, j]
+                terrain_h = terrain.get_height(x, y)
+
                 if h < terrain_h:
-                    w = 0
+                    wvel = np.zeros((3, 1))
                 else:
                     pos = np.vstack((x, y, -h))
-                    w = -wind.get(pos)[-1]
-                wmap[k, i, j] = w
+                    wvel = wind.get(pos)
 
-        quad_wmap, wmap = wmap[0], wmap[1:]
+                frames[k, :, i, j] = np.vstack((h, wvel)).squeeze()
+
+                if abs((1 - r) * x + r * y - d) < PIXSIZE * np.sqrt(2) / 2:
+                    lmvel = wvel
+                else:
+                    lmvel = np.zeros((3, 1))
+
+                landmarks[k, :, i, j] = np.vstack((h, lmvel)).squeeze()
 
         # Save
         path = os.path.join("data", "video")
-        video_id = f"VID_{i:05d}"
+        if not os.path.isdir(path):
+            os.makedirs(path)
+
+        video_id = f"VID_{file_id:05d}"
         data = []
+        for frame, landmark in zip(frames, landmarks):
+            data.append({
+                "frame": frame,
+                "landmarks": landmark,
+            })
         filename = f"{video_id}.vid"
         pkl.dump(data, open(os.path.join(path, filename), "wb"))
+
+
+class UpdraftDataset(Dataset):
+    def __init__(self, root, extension=".vid", shuffle=False,
+                 transform=None, shuffle_frames=False):
+        self.files = [
+            os.path.join(path, filename)
+            for path, dirs, files in os.walk(root)
+            for filename in files
+            if filename.endswith(extension)
+        ]
+        self.files.sort()
+        self.transform = transform
+        self.length = len(self.files)
+        self.indices = np.arange(self.length)
+
+        if shuffle:
+            random.shuffle(self.indices)
+
+        self.shuffle_frames = shuffle_frames
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        real_idx = self.indices[idx]
+        path = self.files[real_idx]
+        data = pkl.load(open(path, "rb"))
+        if self.shuffle_frames:
+            random.shuffle(data)
+
+        data_array = []
+        for d in data:
+            x = d["frame"]
+            y = d["landmarks"]
+            if self.transform:
+                x = self.transform(x)
+                y = self.transform(y)
+            assert torch.is_tensor(x)
+            data_array.append(torch.stack((x, y)))
+        data_array = torch.stack(data_array)
+
+        return real_idx, data_array
+
+
+class ToTensor:
+    """Change a numpy array of an image [C, W, H] to a tensor"""
+    def __call__(self, image):
+        return torch.from_numpy(image).float()
 
 
 def plot(xmap, ymap, hmap, hlist, wmap):
@@ -176,3 +250,4 @@ def plot(xmap, ymap, hmap, hlist, wmap):
 
 if __name__ == "__main__":
     preprocess_dataset()
+    # pass
