@@ -3,6 +3,7 @@ import sys
 import logging
 import pickle as pkl
 from datetime import datetime
+import click
 
 import torch
 import torch.nn as nn
@@ -12,10 +13,26 @@ from torch.utils.data import DataLoader
 
 import args
 import network
-from dataset import preprocess_dataset, UpdraftDataset, ToTensor
+from dataset import UpdraftDataset, ToTensor
 
 
-def meta_train():
+@click.group()
+def main():
+    if not os.path.isdir(args.LOG_DIR):
+        os.makedirs(args.LOG_DIR)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        filename=os.path.join(args.LOG_DIR, f'{datetime.now():%Y%m%d}.log'),
+        format='[%(asctime)s][%(levelname)s] %(message)s',
+        datefmt='%H:%M:%S'
+    )
+
+    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+
+
+@main.command()
+def meta():
     # Meta Learning
     """https://github.com/grey-eye/talking-heads"""
     run_start = datetime.now()
@@ -117,19 +134,19 @@ def meta_train():
             save_image(os.path.join(args.GENERATED_DIR, f"last_result_x_hat.pkl"),
                        x_hat[0])
 
-            if (batch_num + 1) % 100 == 0:
+            if (epoch + 1) % 100 == 0:
                 save_image(
                     os.path.join(
                         args.GENERATED_DIR,
-                        f'{datetime.now():%Y%m%d_%H%M%S%f}_x.png'),
+                        f"{datetime.now():%Y%m%d_%H%M%S%f}_x.png"),
                     x_t[0])
                 save_image(
                     os.path.join(
                         args.GENERATED_DIR,
-                        f'{datetime.now():%Y%m%d_%H%M%S%f}_x_hat.png'),
+                        f"{datetime.now():%Y%m%d_%H%M%S%f}_x_hat.png"),
                     x_hat[0])
 
-            if (batch_num + 1) % 100 == 0:
+            if (epoch + 1) % 100 == 0:
                 save_model(E, run_start)
                 save_model(G, run_start)
                 save_model(D, run_start)
@@ -176,22 +193,6 @@ def save_image(filename, data):
 
     data = data.clone().detach()
     pkl.dump(data, open(filename, "wb"))
-
-
-def main():
-    if not os.path.isdir(args.LOG_DIR):
-        os.makedirs(args.LOG_DIR)
-
-    logging.basicConfig(
-        level=logging.INFO,
-        filename=os.path.join(args.LOG_DIR, f'{datetime.now():%Y%m%d}.log'),
-        format='[%(asctime)s][%(levelname)s] %(message)s',
-        datefmt='%H:%M:%S'
-    )
-
-    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
-
-    meta_train()
 
 
 if __name__ == "__main__":

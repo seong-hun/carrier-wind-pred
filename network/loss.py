@@ -12,6 +12,8 @@ class LossEG(nn.Module):
         self.match_loss = not feed_forward
 
     def loss_cnt(self, x, x_hat):
+        # return F.mse_loss(
+        #     x.reshape(-1), x_hat.reshape(-1)) * args.LOSS_CNT_WEIGHT
         return F.l1_loss(
             x.reshape(-1), x_hat.reshape(-1)) * args.LOSS_CNT_WEIGHT
 

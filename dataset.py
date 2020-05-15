@@ -4,6 +4,7 @@ import numpy as np
 from scipy import interpolate
 import pickle as pkl
 from tqdm import tqdm, trange
+import click
 
 import torch
 from torch.utils.data import Dataset
@@ -109,7 +110,62 @@ class WindUpdraft:
         return w
 
 
-def preprocess_dataset():
+class UpdraftDataset(Dataset):
+    def __init__(self, root, extension=".vid", shuffle=False,
+                 transform=None, shuffle_frames=False):
+        self.files = [
+            os.path.join(path, filename)
+            for path, dirs, files in os.walk(root)
+            for filename in files
+            if filename.endswith(extension)
+        ]
+        self.files.sort()
+        self.transform = transform
+        self.length = len(self.files)
+        self.indices = np.arange(self.length)
+
+        if shuffle:
+            random.shuffle(self.indices)
+
+        self.shuffle_frames = shuffle_frames
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        real_idx = self.indices[idx]
+        path = self.files[real_idx]
+        data = pkl.load(open(path, "rb"))
+        if self.shuffle_frames:
+            random.shuffle(data)
+
+        data_array = []
+        for d in data:
+            x = d["frame"]
+            y = d["landmarks"]
+            if self.transform:
+                x = self.transform(x)
+                y = self.transform(y)
+            assert torch.is_tensor(x)
+            data_array.append(torch.stack((x, y)))
+        data_array = torch.stack(data_array)
+
+        return real_idx, data_array
+
+
+class ToTensor:
+    """Change a numpy array of an image [C, W, H] to a tensor"""
+    def __call__(self, image):
+        return torch.from_numpy(image).float()
+
+
+@click.group()
+def main():
+    pass
+
+
+@main.command()
+def generate():
     # Terrain
     terrain = Terrain()
 
@@ -174,55 +230,7 @@ def preprocess_dataset():
         pkl.dump(data, open(os.path.join(path, filename), "wb"))
 
 
-class UpdraftDataset(Dataset):
-    def __init__(self, root, extension=".vid", shuffle=False,
-                 transform=None, shuffle_frames=False):
-        self.files = [
-            os.path.join(path, filename)
-            for path, dirs, files in os.walk(root)
-            for filename in files
-            if filename.endswith(extension)
-        ]
-        self.files.sort()
-        self.transform = transform
-        self.length = len(self.files)
-        self.indices = np.arange(self.length)
-
-        if shuffle:
-            random.shuffle(self.indices)
-
-        self.shuffle_frames = shuffle_frames
-
-    def __len__(self):
-        return self.length
-
-    def __getitem__(self, idx):
-        real_idx = self.indices[idx]
-        path = self.files[real_idx]
-        data = pkl.load(open(path, "rb"))
-        if self.shuffle_frames:
-            random.shuffle(data)
-
-        data_array = []
-        for d in data:
-            x = d["frame"]
-            y = d["landmarks"]
-            if self.transform:
-                x = self.transform(x)
-                y = self.transform(y)
-            assert torch.is_tensor(x)
-            data_array.append(torch.stack((x, y)))
-        data_array = torch.stack(data_array)
-
-        return real_idx, data_array
-
-
-class ToTensor:
-    """Change a numpy array of an image [C, W, H] to a tensor"""
-    def __call__(self, image):
-        return torch.from_numpy(image).float()
-
-
+@main.command()
 def plot(xmap, ymap, hmap, hlist, wmap):
     # Plotting
     import matplotlib
@@ -249,5 +257,6 @@ def plot(xmap, ymap, hmap, hlist, wmap):
 
 
 if __name__ == "__main__":
-    preprocess_dataset()
+    main()
+    # preprocess_dataset()
     # pass

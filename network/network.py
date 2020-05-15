@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from components import (
+from .components import (
     ResidualBlock, AdaptiveResidualBlock, ResidualBlockDown,
     AdaptiveResidualBlockUp, SelfAttention
 )
@@ -201,10 +201,9 @@ class Discriminator(nn.Module):
         out = F.relu(self.pooling(out_5)).view(-1, 128, 1)  # [B, 128, 1]
 
         # Calculate Realism Score
-        _out = out.transpose(1, 2)
-        _W_i = (self.W[:, i].unsqueeze(-1)).transpose(0, 1)
+        _out = out.transpose(1, 2)  # [B, 1, 128]
+        _W_i = (self.W[:, i].unsqueeze(-1)).transpose(0, 1)  # [B, 128, 1]
         out = torch.bmm(_out, _W_i + self.w_0) + self.b
-        out = torch.sigmoid(out)
 
         out = out.reshape(x.shape[0])
 
