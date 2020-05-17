@@ -13,7 +13,8 @@ from dataset import UpdraftDataset, ToTensor
 E = network.Embedder()
 G = network.Generator()
 
-DATANUM = "20200514_2113"
+# DATANUM = "20200514_2113"
+DATANUM = "20200515_1346"
 train.load_model(E, DATANUM)
 train.load_model(G, DATANUM)
 

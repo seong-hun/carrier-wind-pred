@@ -35,6 +35,7 @@ def main():
 def meta():
     # Meta Learning
     """https://github.com/grey-eye/talking-heads"""
+
     run_start = datetime.now()
     logging.info("===== META-TRAINING =====")
     logging.info(f"Training using dataset located in {args.DATASET_PATH}")
@@ -129,9 +130,9 @@ def meta():
                     f"D(x_hat) = {r_x_hat.mean().item():.4f}")
 
             # Save
-            save_image(os.path.join(args.GENERATED_DIR, f"last_result_x.pkl"),
+            save_image(os.path.join(args.GENERATED_DIR, "last_result_x.pkl"),
                        x_t[0])
-            save_image(os.path.join(args.GENERATED_DIR, f"last_result_x_hat.pkl"),
+            save_image(os.path.join(args.GENERATED_DIR, "last_result_x_hat.pkl"),
                        x_hat[0])
 
             if (epoch + 1) % 100 == 0:
@@ -163,26 +164,27 @@ def save_model(model, time_for_name=None):
     if time_for_name is None:
         time_for_name = datetime.now()
 
-    m = model
-
-    m.eval()
+    model.eval()
 
     if not os.path.exists(args.MODELS_DIR):
         os.makedirs(args.MODELS_DIR)
-    filename = f'{type(m).__name__}_{time_for_name:%Y%m%d_%H%M}.pth'
+    filename = f'{type(model).__name__}_{time_for_name:%Y%m%d_%H%M}.pth'
     torch.save(
-        m.state_dict(),
+        model.state_dict(),
         os.path.join(args.MODELS_DIR, filename)
     )
 
-    m.train()
+    model.train()
 
     logging.info(f'Model saved: {filename}')
 
 
 def load_model(model, continue_id):
     filename = f'{type(model).__name__}_{continue_id}.pth'
-    state_dict = torch.load(os.path.join(args.MODELS_DIR, filename))
+    state_dict = torch.load(
+        os.path.join(args.MODELS_DIR, filename),
+        map_location=model.device
+    )
     model.load_state_dict(state_dict)
     return model
 

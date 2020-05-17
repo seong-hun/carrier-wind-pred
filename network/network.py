@@ -10,6 +10,7 @@ from .components import (
 )
 import args
 
+can_cuda = torch.cuda.is_available()
 
 def weights_init(m):
     classname = m.__class__.__name__
@@ -22,6 +23,12 @@ def weights_init(m):
     elif classname.find('InstanceNorm2d') != -1:
         m.weight.data.normal_(1.0, 0.02)
         m.bias.data.fill_(0)
+
+
+def set_device(module):
+    use_cuda = can_cuda and args.GPU[type(module).__name__]
+    module.device = "cuda" if use_cuda else "cpu"
+    module.to(module.device)
 
 
 class Embedder(nn.Module):
@@ -38,10 +45,15 @@ class Embedder(nn.Module):
 
         self.apply(weights_init)
 
+        set_device(self)
+
     def forward(self, x, y):
         # x, y: [BxK, 4, 32, 32]
         assert x.dim() == 4 and x.shape[1] == 4
         assert x.shape == y.shape
+
+        x = x.to(self.device)
+        y = y.to(self.device)
 
         out = torch.cat((x, y), dim=1)  # [BxK, 8, 32, 32]
 
@@ -112,7 +124,14 @@ class Generator(nn.Module):
         self.deconv1 = AdaptiveResidualBlockUp(32, 4, upsample=2)
         self.in1_d = nn.InstanceNorm2d(4, affine=True)
 
+        self.apply(weights_init)
+
+        set_device(self)
+
     def forward(self, y, e):
+        e = e.to(self.device)
+        y = y.to(self.device)
+
         out = y  # [B, 4, 32, 32]
 
         # Calculate psi_hat parameters
@@ -182,9 +201,14 @@ class Discriminator(nn.Module):
 
         self.apply(weights_init)
 
+        set_device(self)
+
     def forward(self, x, y, i):
         assert x.dim() == 4 and x.shape[1] == 4
         assert x.shape == y.shape
+
+        x = x.to(self.device)
+        y = y.to(self.device)
 
         # Concatenate x & y
         out = torch.cat((x, y), dim=1)  # [B, 8, 32, 32]

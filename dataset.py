@@ -52,33 +52,44 @@ class WindUpdraft:
         self.basewind = basewind
         self.terrain = terrain
         self.center = np.asarray(center)
+        # Height of the updraft center
+        self.hc = self.get_terrain_height(*center)
 
     def get(self, pos):
-        pos = pos.squeeze()
-        x, y = pos[:2]
-        h = -pos[2] - self._get_base_height(x, y)
-        xc, yc = self._get_center(h)
-        w = self._get_w(x, y, h, xc, yc, zi=self.zi, wast=self.wast, A=self.A)
-        basevel = self.basewind.get(pos)
-        return np.vstack((0, 0, -w)) + basevel
+        basewindvel = self.basewind.get(pos)
+        pos = np.squeeze(pos)
+        (x, y), h = pos[:2], -pos[2]
+        hr = h - self.get_terrain_height(x, y)
+        hw = h - self.hc
+        xc, yc = self.get_center(hw)
+        assert hr >= 0 and hw >= 0
+        w = self.get_updraft(
+            x, y, hr, xc, yc, zi=self.zi, wast=self.wast, A=self.A)
+        return np.vstack((0, 0, -w)) + basewindvel
 
-    def _get_base_height(self, x, y):
+    def is_valid_height(self, x, y, h):
+        return h >= self.get_terrain_height(x, y) and h > wind.hc
+
+    def get_terrain_height(self, x, y):
         h = 0
         if self.terrain:
             h = h + self.terrain.get_height(x, y)
         return h
 
-    def _get_center(self, z):
+    def get_center(self, hw):
         """z is altitude"""
-        ratio = 50 * np.tanh(12 * z / self.zi)
+        # Expected maximum horizontal wind speed: 6 m/s
+        # Expected maximum shifted center of the updraft: 150 m
+        ratio = 150 / 6 * np.tanh(hw / 300)
         center = self.center
         if self.basewind:
-            pos = np.vstack((0, 0, -z))
-            basevel = self.basewind.get(pos).squeeze()[:2]
-            center = center + basevel * ratio
+            h = hw + self.hc
+            pos = np.vstack((0, 0, -h))
+            basewindvel = self.basewind.get(pos).squeeze()[:2]
+            center = center + basewindvel * ratio
         return center
 
-    def _get_w(self, x, y, z, xc, yc, A, zi, wast):
+    def get_updraft(self, x, y, z, xc, yc, A, zi, wast):
         """z is altitude"""
         zratio = z / zi
         r2 = max(10, 0.102 * zratio**(1/3) * (1 - 0.25 * zratio) * zi)
@@ -169,43 +180,44 @@ def generate():
     # Terrain
     terrain = Terrain()
 
-    PIXSIZE = 2 * args.MAPSIZE / (args.GRIDSIZE - 1)
+    MAPSIZE = args.MAPSIZE
+    PIXSIZE = 2 * MAPSIZE / (args.GRIDSIZE - 1)
     hlist = np.linspace(200, 500, args.FRAMENUM)  # frame
 
     for file_id in trange(args.VIDEONUM):
         # Map (random location)
-        maploc = np.random.rand(2) * 2 * args.MAPSIZE
-        xlim = maploc[0] + np.array((-args.MAPSIZE, args.MAPSIZE))
-        ylim = maploc[1] + np.array((-args.MAPSIZE, args.MAPSIZE))
+        mapcenter = np.random.uniform(-MAPSIZE, MAPSIZE, size=2)
+        # mapcenter = np.random.rand(2) * 2 * MAPSIZE
+        xlim = mapcenter[0] + np.array((-MAPSIZE, MAPSIZE)) / 2
+        ylim = mapcenter[1] + np.array((-MAPSIZE, MAPSIZE)) / 2
         xgrid = np.linspace(*xlim, args.GRIDSIZE)
         ygrid = np.linspace(*ylim, args.GRIDSIZE)
         xmap, ymap = np.meshgrid(xgrid, ygrid)
-        A = float(np.diff(xlim) * np.diff(ylim))
 
         # Wind (random base velocity, and random updraft center)
         basewindvel = np.random.randn(2) * 9
         basewind = WindShear(*basewindvel)
-        center = maploc + 0.2 * np.random.randn(2) * args.MAPSIZE
-        wind = WindUpdraft(A=A, basewind=basewind, terrain=terrain)
+        windcenter = mapcenter + np.random.unirofrm(-MAPSIZE/5, MAPSIZE/5, size=2)
+        wind = WindUpdraft(A=MAPSIZE**2, basewind=basewind, terrain=terrain)
 
-        frames = np.zeros(hlist.shape + (4, ) + xmap.shape)  # [K, C, W, H]
-        landmarks = np.zeros(hlist.shape + (4, ) + xmap.shape)  # [K, C, W, H]
+        frames = np.zeros(hlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
+        landmarks = np.zeros(hlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
 
         for k, h in enumerate(hlist):
             r = np.random.rand()
-            d = (1 - r) * center[0] + r * center[1]
+            d = (1 - r) * windcenter[0] + r * windcenter[1]
             for i, j in np.ndindex(xmap.shape):
                 x = xmap[i, j]
                 y = ymap[i, j]
-                terrain_h = terrain.get_height(x, y)
 
-                if h < terrain_h:
-                    wvel = np.zeros((3, 1))
+                is_valid = wind.is_valid_height(x, y, h)
+                if not is_valid:
+                    wvel = np.ones((3, 1)) * args.NANVALUE
                 else:
                     pos = np.vstack((x, y, -h))
                     wvel = wind.get(pos)
 
-                frames[k, :, i, j] = np.vstack((h, wvel)).squeeze()
+                frames[k, :, i, j] = np.vstack((wvel, h, is_valid)).squeeze()
 
                 if abs((1 - r) * x + r * y - d) < PIXSIZE * np.sqrt(2) / 2:
                     lmvel = wvel
@@ -257,6 +269,7 @@ def plot(xmap, ymap, hmap, hlist, wmap):
 
 
 if __name__ == "__main__":
-    main()
+    # main()
     # preprocess_dataset()
     # pass
+    wind = WindUpdraft(A=2500, basewind=WindShear(5, 5), terrain=Terrain())

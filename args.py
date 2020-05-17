@@ -5,6 +5,18 @@ LOG_DIR = os.path.join("logs")
 GENERATED_DIR = os.path.join("data", "generated")
 MODELS_DIR = os.path.join("data", "models")
 
+# GPU
+GPU = {
+    'Embedder': True,
+    'Generator': False,
+    'Discriminator': False,
+    'LossEG': True,
+    'LossD': True,
+}
+
+# Dataset hyperparameters
+NANVALUE = 50
+
 # Training Hyperparameters
 MAPSIZE = 500
 GRIDSIZE = 32
