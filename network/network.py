@@ -159,7 +159,8 @@ class Generator(nn.Module):
         out = self.in2_d(self.deconv2(out, *self.slice_psi(psi_hat, 'deconv2')))
         out = self.in1_d(self.deconv1(out, *self.slice_psi(psi_hat, 'deconv1')))
 
-        out = torch.tanh(out) * 10
+        out[:, :3, ...] = torch.tanh(out[:, :3, ...]) * 10
+        out[:, 4, ...] = torch.tanh(out[:, 4, ...])
 
         return out
 
@@ -169,7 +170,7 @@ class Generator(nn.Module):
         aux = psi[:, idx0:idx1].unsqueeze(-1)
         mean1, std1 = aux[:, 0:len1], aux[:, len1:2 * len1]
         mean2, std2 = aux[:, 2 * len1:2 * len1 + len2], aux[:, 2 * len1 + len2:]
-        return mean1, std1, mean2, std2
+        return mean1, std1.abs(), mean2, std2.abs()
 
     def define_psi_slices(self):
         out = {}
@@ -231,5 +232,6 @@ class Discriminator(nn.Module):
         out = torch.bmm(_out, _W_i + self.w_0) + self.b
 
         out = out.reshape(x.shape[0])
+        # out = torch.tanh(out)
 
         return out, [out_0, out_1, out_2, out_3, out_4, out_5]

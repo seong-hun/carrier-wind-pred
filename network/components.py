@@ -42,12 +42,14 @@ class SelfAttention(nn.Module):
 
 
 class ConvLayer(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding=None):
-        super(ConvLayer, self).__init__()
+    def __init__(self, in_channels, out_channels, kernel_size, stride,
+                 padding=None):
+        super().__init__()
         if padding is None:
             padding = kernel_size // 2
         self.reflection_pad = nn.ReflectionPad2d(padding)
-        self.conv2d = nn.utils.spectral_norm(nn.Conv2d(in_channels, out_channels, kernel_size, stride))
+        self.conv2d = nn.utils.spectral_norm(
+            nn.Conv2d(in_channels, out_channels, kernel_size, stride))
 
     def forward(self, x):
         out = self.reflection_pad(x)
@@ -57,7 +59,7 @@ class ConvLayer(nn.Module):
 
 class AdaIn(nn.Module):
     def __init__(self):
-        super(AdaIn, self).__init__()
+        super().__init__()
         self.eps = 1e-5
 
     def forward(self, x, mean_style, std_style):
@@ -80,7 +82,7 @@ class AdaIn(nn.Module):
 
 class ResidualBlockDown(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=None):
-        super(ResidualBlockDown, self).__init__()
+        super().__init__()
 
         # Right Side
         self.conv_r1 = ConvLayer(in_channels, out_channels, kernel_size, stride, padding)
@@ -173,8 +175,9 @@ class ResidualBlock(nn.Module):
 
 
 class AdaptiveResidualBlockUp(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, upsample=2):
-        super(AdaptiveResidualBlockUp, self).__init__()
+    def __init__(self, in_channels, out_channels,
+                 kernel_size=3, stride=1, upsample=2):
+        super().__init__()
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -215,7 +218,7 @@ class AdaptiveResidualBlockUp(nn.Module):
 
 class AdaptiveResidualBlock(nn.Module):
     def __init__(self, channels):
-        super(AdaptiveResidualBlock, self).__init__()
+        super().__init__()
         self.conv1 = ConvLayer(channels, channels, kernel_size=3, stride=1)
         self.in1 = AdaIn()
         self.conv2 = ConvLayer(channels, channels, kernel_size=3, stride=1)

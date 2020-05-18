@@ -27,9 +27,14 @@ class LossEG(nn.Module):
         return F.l1_loss(
             W_i.reshape(-1), e_hat.reshape(-1)) * args.LOSS_MCH_WEIGHT
 
-    def loss_lan(self, x_hat, y):
-        return F.l1_liss(
-            x_hat[:, :4, ...] - y[:, :4, ...]) #TODO
+    # def loss_lan(self, x_hat, y):
+    #     """Landmark loss"""
+    #     land_pred = x_hat.transpose(1, 0)[:4, ...]  # [C, B, W, H]
+    #     y = y.transpose(1, 0)  # [C, B, W, H]
+    #     land_pred[:, y[4, ...] == 0] = args.NANVALUE
+    #     return F.l1_loss(
+    #         land_pred.reshape(-1),
+    #         y[:4, ...].reshape(-1)) * args.LOSS_LAN_WEIGHT
 
     def forward(self, x, y, x_hat, r_x_hat, e_hat, W_i):
         x = x.to(self.device)
@@ -42,7 +47,7 @@ class LossEG(nn.Module):
         cnt = self.loss_cnt(x, x_hat)
         adv = self.loss_adv(r_x_hat)
         mch = self.loss_mch(e_hat, W_i)
-        lan = self.loss_lan(x_hat, y)
+        # lan = self.loss_lan(x_hat, y)
 
         return (cnt + adv + mch).reshape(1)
 

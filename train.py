@@ -96,23 +96,22 @@ def meta():
 
             optimizer_E_G.zero_grad()
             optimizer_D.zero_grad()
-
             loss_E_G = criterion_E_G(
                 x_t, y_t, x_hat, r_x_hat, e_hat, D.W[:, i].transpose(1, 0))
             loss_D = criterion_D(r_x, r_x_hat)
             loss = loss_E_G + loss_D
             loss.backward()
-
-            if batch_num > 1:
-                breakpoint()
-
             optimizer_E_G.step()
             optimizer_D.step()
 
+            for p in G.parameters():
+                if torch.isnan(p).any():
+                    breakpoint()
+
             # Optimize D again
             x_hat = G(y_t, e_hat).detach()
-            r_x_hat, D_act_hat = D(x_hat, y_t, i)
-            r_x, D_act = D(x_t, y_t, i)
+            r_x_hat, _ = D(x_hat, y_t, i)
+            r_x, _ = D(x_t, y_t, i)
 
             optimizer_D.zero_grad()
             loss_D = criterion_D(r_x, r_x_hat)
