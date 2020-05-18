@@ -12,6 +12,7 @@ import args
 
 can_cuda = torch.cuda.is_available()
 
+
 def weights_init(m):
     classname = m.__class__.__name__
     if classname.find('Conv2d') != -1:
@@ -35,7 +36,7 @@ class Embedder(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.conv1 = ResidualBlockDown(8, 32)
+        self.conv1 = ResidualBlockDown(args.CHANNEL * 2, 32)
         self.conv2 = ResidualBlockDown(32, 64)
         self.att = SelfAttention(64)
         self.conv3 = ResidualBlockDown(64, 128)
@@ -48,14 +49,14 @@ class Embedder(nn.Module):
         set_device(self)
 
     def forward(self, x, y):
-        # x, y: [BxK, 4, 32, 32]
-        assert x.dim() == 4 and x.shape[1] == 4
+        # x, y: [BxK, 5, 32, 32]
+        assert x.dim() == 4 and x.shape[1] == args.CHANNEL
         assert x.shape == y.shape
 
         x = x.to(self.device)
         y = y.to(self.device)
 
-        out = torch.cat((x, y), dim=1)  # [BxK, 8, 32, 32]
+        out = torch.cat((x, y), dim=1)  # [BxK, 10, 32, 32]
 
         # Encode
         out = self.conv1(out)
@@ -78,7 +79,7 @@ class Generator(nn.Module):
         ('deconv4', (128, 128)),
         ('deconv3', (128, 64)),
         ('deconv2', (64, 32)),
-        ('deconv1', (32, 4))
+        ('deconv1', (32, args.CHANNEL))
     ])
 
     def __init__(self):
@@ -90,7 +91,7 @@ class Generator(nn.Module):
             self.psi_length, args.E_VECTOR_LENGTH).normal_(.0, .02))
 
         # Encoding layers
-        self.conv1 = ResidualBlockDown(4, 32)
+        self.conv1 = ResidualBlockDown(args.CHANNEL, 32)
         self.in1_e = nn.InstanceNorm2d(32, affine=True)
 
         self.conv2 = ResidualBlockDown(32, 64)
@@ -121,8 +122,8 @@ class Generator(nn.Module):
         self.deconv2 = AdaptiveResidualBlockUp(64, 32, upsample=2)
         self.in2_d = nn.InstanceNorm2d(32, affine=True)
 
-        self.deconv1 = AdaptiveResidualBlockUp(32, 4, upsample=2)
-        self.in1_d = nn.InstanceNorm2d(4, affine=True)
+        self.deconv1 = AdaptiveResidualBlockUp(32, args.CHANNEL, upsample=2)
+        self.in1_d = nn.InstanceNorm2d(args.CHANNEL, affine=True)
 
         self.apply(weights_init)
 
@@ -132,7 +133,7 @@ class Generator(nn.Module):
         e = e.to(self.device)
         y = y.to(self.device)
 
-        out = y  # [B, 4, 32, 32]
+        out = y  # [B, 5, 32, 32]
 
         # Calculate psi_hat parameters
         P = self.projection.unsqueeze(0)
@@ -158,7 +159,7 @@ class Generator(nn.Module):
         out = self.in2_d(self.deconv2(out, *self.slice_psi(psi_hat, 'deconv2')))
         out = self.in1_d(self.deconv1(out, *self.slice_psi(psi_hat, 'deconv1')))
 
-        out = torch.tanh(out) * 15
+        out = torch.tanh(out) * 10
 
         return out
 
@@ -186,7 +187,7 @@ class Discriminator(nn.Module):
     def __init__(self, training_videos):
         super().__init__()
 
-        self.conv1 = ResidualBlockDown(8, 32)
+        self.conv1 = ResidualBlockDown(args.CHANNEL * 2, 32)
         self.conv2 = ResidualBlockDown(32, 64)
         self.att = SelfAttention(64)
         self.conv3 = ResidualBlockDown(64, 128)
@@ -204,14 +205,14 @@ class Discriminator(nn.Module):
         set_device(self)
 
     def forward(self, x, y, i):
-        assert x.dim() == 4 and x.shape[1] == 4
+        assert x.dim() == 4 and x.shape[1] == args.CHANNEL
         assert x.shape == y.shape
 
         x = x.to(self.device)
         y = y.to(self.device)
 
         # Concatenate x & y
-        out = torch.cat((x, y), dim=1)  # [B, 8, 32, 32]
+        out = torch.cat((x, y), dim=1)  # [B, 10, 32, 32]
 
         # Encode
         out_0 = (self.conv1(out))  # [B, 32, 16. 16]

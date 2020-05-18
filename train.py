@@ -98,10 +98,13 @@ def meta():
             optimizer_D.zero_grad()
 
             loss_E_G = criterion_E_G(
-                x_t, x_hat, r_x_hat, e_hat, D.W[:, i].transpose(1, 0))
+                x_t, y_t, x_hat, r_x_hat, e_hat, D.W[:, i].transpose(1, 0))
             loss_D = criterion_D(r_x, r_x_hat)
             loss = loss_E_G + loss_D
             loss.backward()
+
+            if batch_num > 1:
+                breakpoint()
 
             optimizer_E_G.step()
             optimizer_D.step()
@@ -121,7 +124,8 @@ def meta():
             # Show progress
             if (batch_num + 1) % 1 == 0 or batch_num == 0:
                 logging.info(
-                    f"Epoch {epoch + 1}: [{batch_num + 1}/{len(dataset)}] | "
+                    f"Epoch {epoch + 1}/{args.EPOCHS}: "
+                    f"[{batch_num + 1}/{len(dataset)}] | "
                     f"Time: {batch_end - batch_start} | "
                     f"Loss_E_G = {loss_E_G.item():.4f} "
                     f"Loss_D = {loss_D.item():.4f}")

@@ -27,15 +27,22 @@ class LossEG(nn.Module):
         return F.l1_loss(
             W_i.reshape(-1), e_hat.reshape(-1)) * args.LOSS_MCH_WEIGHT
 
-    def forward(self, x, x_hat, r_x_hat, e_hat, W_i):
+    def loss_lan(self, x_hat, y):
+        return F.l1_liss(
+            x_hat[:, :4, ...] - y[:, :4, ...]) #TODO
+
+    def forward(self, x, y, x_hat, r_x_hat, e_hat, W_i):
         x = x.to(self.device)
+        y = y.to(self.device)
         x_hat = x_hat.to(self.device)
         r_x_hat = r_x_hat.to(self.device)
         e_hat = e_hat.to(self.device)
+        W_i = W_i.to(self.device)
 
         cnt = self.loss_cnt(x, x_hat)
         adv = self.loss_adv(r_x_hat)
         mch = self.loss_mch(e_hat, W_i)
+        lan = self.loss_lan(x_hat, y)
 
         return (cnt + adv + mch).reshape(1)
 
