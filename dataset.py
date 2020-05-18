@@ -60,15 +60,28 @@ class WindUpdraft:
         pos = np.squeeze(pos)
         (x, y), h = pos[:2], -pos[2]
         hr = h - self.get_terrain_height(x, y)
+        hr = 2 * hr
         hw = h - self.hc
         xc, yc = self.get_center(hw)
         assert hr >= 0 and hw >= 0
+
+        wx, wy = basewindvel[:2]
+        ws = np.sqrt(wx ** 2 + wy ** 2)  # Wind speed
+        wa = np.arctan2(wy, wx)  # Wind angle
+        xr, yr = x - xc, y - yc
+        xrr = np.cos(wa) * xr + np.sin(wa) * yr
+        yrr = -np.sin(wa) * xr + np.cos(wa) * yr
+        a, b = 1 + 0.03 * ws, 1
+        c = (xrr / a)**2 + (yrr / b)**2
+        x = np.sqrt(c) * a + xc
+        y = yc
+
         w = self.get_updraft(
             x, y, hr, xc, yc, zi=self.zi, wast=self.wast, A=self.A)
         return np.vstack((0, 0, -w)) + basewindvel
 
     def is_valid_height(self, x, y, h):
-        return h >= self.get_terrain_height(x, y) and h > wind.hc
+        return h >= self.get_terrain_height(x, y) and h >= self.hc
 
     def get_terrain_height(self, x, y):
         h = 0
@@ -80,7 +93,7 @@ class WindUpdraft:
         """z is altitude"""
         # Expected maximum horizontal wind speed: 6 m/s
         # Expected maximum shifted center of the updraft: 150 m
-        ratio = 150 / 6 * np.tanh(hw / 300)
+        ratio = 100 / 6 * np.tanh(hw / 300)
         center = self.center
         if self.basewind:
             h = hw + self.hc
@@ -182,49 +195,67 @@ def generate():
 
     MAPSIZE = args.MAPSIZE
     PIXSIZE = 2 * MAPSIZE / (args.GRIDSIZE - 1)
-    hlist = np.linspace(200, 500, args.FRAMENUM)  # frame
+
+    hrlist = np.linspace(0, 300, args.FRAMENUM)  # relative heights
 
     for file_id in trange(args.VIDEONUM):
-        # Map (random location)
-        mapcenter = np.random.uniform(-MAPSIZE, MAPSIZE, size=2)
-        # mapcenter = np.random.rand(2) * 2 * MAPSIZE
-        xlim = mapcenter[0] + np.array((-MAPSIZE, MAPSIZE)) / 2
-        ylim = mapcenter[1] + np.array((-MAPSIZE, MAPSIZE)) / 2
-        xgrid = np.linspace(*xlim, args.GRIDSIZE)
-        ygrid = np.linspace(*ylim, args.GRIDSIZE)
-        xmap, ymap = np.meshgrid(xgrid, ygrid)
+        # Define an identity
+        while True:
+            # Map (random location)
+            mapcenter = np.random.uniform(-MAPSIZE, MAPSIZE, size=2)
 
-        # Wind (random base velocity, and random updraft center)
-        basewindvel = np.random.randn(2) * 9
-        basewind = WindShear(*basewindvel)
-        windcenter = mapcenter + np.random.unirofrm(-MAPSIZE/5, MAPSIZE/5, size=2)
-        wind = WindUpdraft(A=MAPSIZE**2, basewind=basewind, terrain=terrain)
+            # mapcenter = np.random.rand(2) * 2 * MAPSIZE
+            xlim = mapcenter[0] + np.array((-MAPSIZE, MAPSIZE)) / 2
+            ylim = mapcenter[1] + np.array((-MAPSIZE, MAPSIZE)) / 2
+            xgrid = np.linspace(*xlim, args.GRIDSIZE)
+            ygrid = np.linspace(*ylim, args.GRIDSIZE)
+            xmap, ymap = np.meshgrid(xgrid, ygrid)
 
-        frames = np.zeros(hlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
-        landmarks = np.zeros(hlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
+            # Wind (random base velocity, and random updraft center)
+            basewindvel = np.random.randn(2) * 9
+            basewind = WindShear(*basewindvel)
+            windcenter = mapcenter + np.random.uniform(-MAPSIZE/5, MAPSIZE/5, size=2)
+            wind = WindUpdraft(A=MAPSIZE**2, center=windcenter,
+                               basewind=basewind, terrain=terrain)
 
-        for k, h in enumerate(hlist):
+            # Check validity of the wind center
+            h = terrain.get_height(*windcenter)
+            validmap = np.vectorize(wind.is_valid_height)(xmap, ymap, h)
+            if np.sum(validmap) / validmap.size > 0.4:
+                break
+
+        frames = np.zeros(hrlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
+        landmarks = np.zeros(hrlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
+
+        hlist = terrain.get_height(*windcenter) + hrlist
+        for k, h in enumerate(tqdm(hlist)):
             r = np.random.rand()
-            d = (1 - r) * windcenter[0] + r * windcenter[1]
+            xc, yc = wind.get_center(h - wind.hc)
+            d = (1 - r) * xc + r * yc
             for i, j in np.ndindex(xmap.shape):
-                x = xmap[i, j]
-                y = ymap[i, j]
+                x, y = xmap[i, j], ymap[i, j]
 
                 is_valid = wind.is_valid_height(x, y, h)
-                if not is_valid:
-                    wvel = np.ones((3, 1)) * args.NANVALUE
-                else:
+                if is_valid:
                     pos = np.vstack((x, y, -h))
                     wvel = wind.get(pos)
+                else:
+                    wvel = np.ones((3, 1)) * args.NANVALUE
 
                 frames[k, :, i, j] = np.vstack((wvel, h, is_valid)).squeeze()
 
-                if abs((1 - r) * x + r * y - d) < PIXSIZE * np.sqrt(2) / 2:
+                # Landmark
+                is_landmark = abs((1 - r)*x + r*y - d) < PIXSIZE * np.sqrt(2)/2
+                if is_landmark and is_valid:
                     lmvel = wvel
+                    is_landmark = True
                 else:
-                    lmvel = np.zeros((3, 1))
+                    lmvel = np.ones((3, 1)) * args.NANVALUE
+                    is_landmark = False
 
-                landmarks[k, :, i, j] = np.vstack((h, lmvel)).squeeze()
+                landmarks[k, :, i, j] = np.vstack((lmvel, h, is_landmark)).squeeze()
+
+        # plot(terrain, xmap, ymap, frames, landmarks)
 
         # Save
         path = os.path.join("data", "video")
@@ -242,8 +273,66 @@ def generate():
         pkl.dump(data, open(os.path.join(path, filename), "wb"))
 
 
-@main.command()
-def plot(xmap, ymap, hmap, hlist, wmap):
+def plot(terrain, xmap, ymap, frames, landmarks):
+    import plotly.colors as colors
+    import plotly.graph_objects as go
+
+    data = []
+
+    # Terrain
+    zmap = np.vectorize(terrain.get_height)(xmap, ymap)
+    terrain_trace = go.Surface(
+        x=xmap, y=ymap, z=zmap,
+        colorscale="Darkmint", showscale=False, opacity=1,
+    )
+    data.append(terrain_trace)
+
+    # Wind map & landmarks
+    for k in np.linspace(0, len(frames) - 1, 5, dtype="int"):
+        # Wind map
+        windmap = -frames[k, 2] + frames[k, 3]
+        # windmap[windmap <= frames[k, 3]] = np.nan
+        windmap[frames[k, 4] == 0] = np.nan
+        windmap_trace = go.Surface(
+            x=xmap, y=ymap, z=windmap,
+            surfacecolor=-frames[k, 2],
+            coloraxis="coloraxis",
+        )
+        if k > 0:
+            windmap_trace.opacityscale = [
+                [0, 0], [0.2, 0.7], [0.5, 0.9], [1, 1]]
+        else:
+            windmap_trace.opacity = 0.5
+        data.append(windmap_trace)
+
+        # Landmark
+        landmarkmap = -landmarks[k, 2] + landmarks[k, 3]
+        landmarkmap[landmarks[k, 4] == 0] = np.nan
+        landmark_trace = go.Surface(
+            x=xmap, y=ymap, z=landmarkmap,
+            surfacecolor=-landmarks[k, 2],
+            coloraxis="coloraxis",
+        )
+        if k > 0:
+            landmark_trace.opacityscale = [
+                [0, 0.2], [0.1, 0.9], [1, 1]]
+        else:
+            landmark_trace.opacity = 0
+
+        data.append(landmark_trace)
+
+    fig = go.Figure(data=data)
+    fig.update_layout(
+        title="Title",
+        autosize=False, width=800, height=800,
+        margin={"l": 65, "r": 50, "b": 65, "t": 90},
+        template="none",
+        coloraxis={"colorscale": "Jet", "cmin": 0, "cmax": 6},
+    )
+    fig.show()
+
+
+def _plot(xmap, ymap, hmap, hlist, wmap):
     # Plotting
     import matplotlib
     import matplotlib.pyplot as plt
@@ -269,7 +358,7 @@ def plot(xmap, ymap, hmap, hlist, wmap):
 
 
 if __name__ == "__main__":
-    # main()
+    main()
     # preprocess_dataset()
     # pass
-    wind = WindUpdraft(A=2500, basewind=WindShear(5, 5), terrain=Terrain())
+    # wind = WindUpdraft(A=2500, basewind=WindShear(5, 5), terrain=Terrain())
