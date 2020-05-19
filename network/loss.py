@@ -1,24 +1,61 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+from torchvision.models import vgg19
 
 import args
 from .network import set_device
+from network.vgg import vgg_face, VGG_Activations
 
 
 class LossEG(nn.Module):
     def __init__(self, feed_forward=True):
         super().__init__()
 
+        self.VGG_FACE_AC = VGG_Activations(
+            vgg_face(pretrained=True), [1, 6, 11, 18, 25])
+        self.VGG19_AC = VGG_Activations(
+            vgg19(pretrained=True), [1, 6, 11, 20, 29])
+
         self.match_loss = not feed_forward
 
         set_device(self)
 
     def loss_cnt(self, x, x_hat):
-        # return F.mse_loss(
-        #     x.reshape(-1), x_hat.reshape(-1)) * args.LOSS_CNT_WEIGHT
-        return F.l1_loss(
-            x.reshape(-1), x_hat.reshape(-1)) * args.LOSS_CNT_WEIGHT
+        IMG_NET_MEAN = torch.Tensor([
+            0, 0, 0, 300, 0.5]).reshape([1, args.CHANNEL, 1, 1]).to(x.device)
+        IMG_NET_STD = torch.Tensor([
+            2, 2, 3, 100, 0.3]).reshape([1, args.CHANNEL, 1, 1]).to(x.device)
+
+        x = (x - IMG_NET_MEAN) / IMG_NET_STD
+        x_hat = (x_hat - IMG_NET_MEAN) / IMG_NET_STD
+
+        # VGG19 Loss
+        vgg19_x_hat = self.VGG19_AC(x_hat[:, :3, ...])
+        vgg19_x = self.VGG19_AC(x[:, :3, ...])
+
+        vgg19_loss = 0
+        for i in range(0, len(vgg19_x)):
+            vgg19_loss += F.l1_loss(vgg19_x_hat[i], vgg19_x[i])
+
+        # VGG Face Loss
+        vgg_face_x_hat = self.VGG_FACE_AC(x_hat[:, :3, ...])
+        vgg_face_x = self.VGG_FACE_AC(x[:, :3, ...])
+
+        vgg_face_loss = 0
+        for i in range(0, len(vgg_face_x)):
+            vgg_face_loss += F.l1_loss(vgg_face_x_hat[i], vgg_face_x[i])
+
+        vgg_loss = (
+            vgg19_loss * args.LOSS_VGG19_WEIGHT
+            + vgg_face_loss * args.LOSS_VGG_FACE_WEIGHT)
+
+        # Height and mask loss
+        hm_loss = F.l1_loss(
+            x[:, 3:, ...].reshape(-1),
+            x_hat[:, 3:, ...].reshape(-1)) * args.LOSS_HEIGHT_WEIGHT
+
+        return vgg_loss + hm_loss
 
     def loss_adv(self, r_x_hat):
         return -r_x_hat.mean()
@@ -26,15 +63,6 @@ class LossEG(nn.Module):
     def loss_mch(self, e_hat, W_i):
         return F.l1_loss(
             W_i.reshape(-1), e_hat.reshape(-1)) * args.LOSS_MCH_WEIGHT
-
-    # def loss_lan(self, x_hat, y):
-    #     """Landmark loss"""
-    #     land_pred = x_hat.transpose(1, 0)[:4, ...]  # [C, B, W, H]
-    #     y = y.transpose(1, 0)  # [C, B, W, H]
-    #     land_pred[:, y[4, ...] == 0] = args.NANVALUE
-    #     return F.l1_loss(
-    #         land_pred.reshape(-1),
-    #         y[:4, ...].reshape(-1)) * args.LOSS_LAN_WEIGHT
 
     def forward(self, x, y, x_hat, r_x_hat, e_hat, W_i):
         x = x.to(self.device)
@@ -46,8 +74,7 @@ class LossEG(nn.Module):
 
         cnt = self.loss_cnt(x, x_hat)
         adv = self.loss_adv(r_x_hat)
-        mch = self.loss_mch(e_hat, W_i)
-        # lan = self.loss_lan(x_hat, y)
+        mch = self.loss_mch(e_hat, W_i) if self.match_loss else 0
 
         return (cnt + adv + mch).reshape(1)
 
@@ -55,11 +82,9 @@ class LossEG(nn.Module):
 class LossD(nn.Module):
     def __init__(self):
         super().__init__()
-
         set_device(self)
 
     def forward(self, r_x, r_x_hat):
         r_x = r_x.to(self.device)
         r_x_hat = r_x_hat.to(self.device)
-
         return (F.relu(1 + r_x_hat) + F.relu(1 - r_x)).mean().reshape(-1)

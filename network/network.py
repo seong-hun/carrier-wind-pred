@@ -36,11 +36,13 @@ class Embedder(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.conv1 = ResidualBlockDown(args.CHANNEL * 2, 32)
-        self.conv2 = ResidualBlockDown(32, 64)
-        self.att = SelfAttention(64)
-        self.conv3 = ResidualBlockDown(64, 128)
-        self.conv4 = ResidualBlockDown(128, 128)
+        self.conv1 = ResidualBlockDown(args.CHANNEL * 2, 64)
+        self.conv2 = ResidualBlockDown(64, 128)
+        self.conv3 = ResidualBlockDown(128, 256)
+        self.att = SelfAttention(256)
+        self.conv4 = ResidualBlockDown(256, 512)
+        self.conv5 = ResidualBlockDown(512, 512)
+        self.conv6 = ResidualBlockDown(512, 512)
 
         self.pooling = nn.AdaptiveMaxPool2d((1, 1))
 
@@ -59,11 +61,13 @@ class Embedder(nn.Module):
         out = torch.cat((x, y), dim=1)  # [BxK, 10, 32, 32]
 
         # Encode
-        out = self.conv1(out)
-        out = self.conv2(out)
+        out = (self.conv1(out))  # [BxK, 64, 128, 128]
+        out = (self.conv2(out))  # [BxK, 128, 64, 64]
+        out = (self.conv3(out))  # [BxK, 256, 32, 32]
         out = self.att(out)
-        out = self.conv3(out)
-        out = self.conv4(out)
+        out = (self.conv4(out))  # [BxK, 512, 16, 16]
+        out = (self.conv5(out))  # [BxK, 512, 8, 8]
+        out = (self.conv6(out))  # [BxK, 512, 4, 4]
 
         # Vectorize
         out = F.relu(self.pooling(out).view(-1, args.E_VECTOR_LENGTH))
@@ -73,13 +77,17 @@ class Embedder(nn.Module):
 
 class Generator(nn.Module):
     ADAIN_LAYERS = OrderedDict([
-        ('res1', (128, 128)),
-        ('res2', (128, 128)),
-        ('res3', (128, 128)),
-        ('deconv4', (128, 128)),
-        ('deconv3', (128, 64)),
-        ('deconv2', (64, 32)),
-        ('deconv1', (32, args.CHANNEL))
+        ('res1', (512, 512)),
+        ('res2', (512, 512)),
+        ('res3', (512, 512)),
+        ('res4', (512, 512)),
+        ('res5', (512, 512)),
+        ('deconv6', (512, 512)),
+        ('deconv5', (512, 512)),
+        ('deconv4', (512, 256)),
+        ('deconv3', (256, 128)),
+        ('deconv2', (128, 64)),
+        ('deconv1', (64, args.CHANNEL))
     ])
 
     def __init__(self):
@@ -88,41 +96,55 @@ class Generator(nn.Module):
         # Projection layer
         self.PSI_PORTIONS, self.psi_length = self.define_psi_slices()
         self.projection = nn.Parameter(torch.rand(
-            self.psi_length, args.E_VECTOR_LENGTH).normal_(.0, .02))
+            self.psi_length, args.E_VECTOR_LENGTH).normal_(0.0, 0.02))
 
-        # Encoding layers
-        self.conv1 = ResidualBlockDown(args.CHANNEL, 32)
-        self.in1_e = nn.InstanceNorm2d(32, affine=True)
+        # encoding layers
+        self.conv1 = ResidualBlockDown(args.CHANNEL, 64)
+        self.in1_e = nn.InstanceNorm2d(64, affine=True)
 
-        self.conv2 = ResidualBlockDown(32, 64)
-        self.in2_e = nn.InstanceNorm2d(64, affine=True)
+        self.conv2 = ResidualBlockDown(64, 128)
+        self.in2_e = nn.InstanceNorm2d(128, affine=True)
 
-        self.att1 = SelfAttention(64)
+        self.conv3 = ResidualBlockDown(128, 256)
+        self.in3_e = nn.InstanceNorm2d(256, affine=True)
 
-        self.conv3 = ResidualBlockDown(64, 128)
-        self.in3_e = nn.InstanceNorm2d(128, affine=True)
+        self.att1 = SelfAttention(256)
 
-        self.conv4 = ResidualBlockDown(128, 128)
-        self.in4_e = nn.InstanceNorm2d(128, affine=True)
+        self.conv4 = ResidualBlockDown(256, 512)
+        self.in4_e = nn.InstanceNorm2d(512, affine=True)
+
+        self.conv5 = ResidualBlockDown(512, 512)
+        self.in5_e = nn.InstanceNorm2d(512, affine=True)
+
+        self.conv6 = ResidualBlockDown(512, 512)
+        self.in6_e = nn.InstanceNorm2d(512, affine=True)
 
         # residual layers
-        self.res1 = AdaptiveResidualBlock(128)
-        self.res2 = AdaptiveResidualBlock(128)
-        self.res3 = AdaptiveResidualBlock(128)
+        self.res1 = AdaptiveResidualBlock(512)
+        self.res2 = AdaptiveResidualBlock(512)
+        self.res3 = AdaptiveResidualBlock(512)
+        self.res4 = AdaptiveResidualBlock(512)
+        self.res5 = AdaptiveResidualBlock(512)
 
         # decoding layers
-        self.deconv4 = AdaptiveResidualBlockUp(128, 128, upsample=2)
-        self.in4_d = nn.InstanceNorm2d(128, affine=True)
+        self.deconv6 = AdaptiveResidualBlockUp(512, 512, upsample=2)
+        self.in6_d = nn.InstanceNorm2d(512, affine=True)
 
-        self.deconv3 = AdaptiveResidualBlockUp(128, 64, upsample=2)
-        self.in3_d = nn.InstanceNorm2d(64, affine=True)
+        self.deconv5 = AdaptiveResidualBlockUp(512, 512, upsample=2)
+        self.in5_d = nn.InstanceNorm2d(512, affine=True)
 
-        self.att2 = SelfAttention(64)
+        self.deconv4 = AdaptiveResidualBlockUp(512, 256, upsample=2)
+        self.in4_d = nn.InstanceNorm2d(256, affine=True)
 
-        self.deconv2 = AdaptiveResidualBlockUp(64, 32, upsample=2)
-        self.in2_d = nn.InstanceNorm2d(32, affine=True)
+        self.deconv3 = AdaptiveResidualBlockUp(256, 128, upsample=2)
+        self.in3_d = nn.InstanceNorm2d(128, affine=True)
 
-        self.deconv1 = AdaptiveResidualBlockUp(32, args.CHANNEL, upsample=2)
+        self.att2 = SelfAttention(128)
+
+        self.deconv2 = AdaptiveResidualBlockUp(128, 64, upsample=2)
+        self.in2_d = nn.InstanceNorm2d(64, affine=True)
+
+        self.deconv1 = AdaptiveResidualBlockUp(64, args.CHANNEL, upsample=2)
         self.in1_d = nn.InstanceNorm2d(args.CHANNEL, affine=True)
 
         self.apply(weights_init)
@@ -160,7 +182,8 @@ class Generator(nn.Module):
         out = self.in1_d(self.deconv1(out, *self.slice_psi(psi_hat, 'deconv1')))
 
         out[:, :3, ...] = torch.tanh(out[:, :3, ...]) * 10
-        out[:, 4, ...] = torch.tanh(out[:, 4, ...])
+        out[:, 3, ...] = torch.sigmoid(out[:, 3, ...]) * 600
+        out[:, 4, ...] = torch.sigmoid(out[:, 4, ...])
 
         return out
 
@@ -188,17 +211,19 @@ class Discriminator(nn.Module):
     def __init__(self, training_videos):
         super().__init__()
 
-        self.conv1 = ResidualBlockDown(args.CHANNEL * 2, 32)
-        self.conv2 = ResidualBlockDown(32, 64)
-        self.att = SelfAttention(64)
-        self.conv3 = ResidualBlockDown(64, 128)
-        self.conv4 = ResidualBlockDown(128, 128)
-        self.res_block = ResidualBlock(128)
+        self.conv1 = ResidualBlockDown(args.CHANNEL * 2, 64)
+        self.conv2 = ResidualBlockDown(64, 128)
+        self.conv3 = ResidualBlockDown(128, 256)
+        self.att = SelfAttention(256)
+        self.conv4 = ResidualBlockDown(256, 512)
+        self.conv5 = ResidualBlockDown(512, 512)
+        self.conv6 = ResidualBlockDown(512, 512)
+        self.res_block = ResidualBlock(512)
 
         self.pooling = nn.AdaptiveMaxPool2d((1, 1))
 
-        self.W = nn.Parameter(torch.rand(128, training_videos).normal_(0.0, 0.02))
-        self.w_0 = nn.Parameter(torch.rand(128, 1).normal_(0.0, 0.02))
+        self.W = nn.Parameter(torch.rand(512, training_videos).normal_(0.0, 0.02))
+        self.w_0 = nn.Parameter(torch.rand(512, 1).normal_(0.0, 0.02))
         self.b = nn.Parameter(torch.rand(1).normal_(0.0, 0.02))
 
         self.apply(weights_init)
@@ -216,22 +241,24 @@ class Discriminator(nn.Module):
         out = torch.cat((x, y), dim=1)  # [B, 10, 32, 32]
 
         # Encode
-        out_0 = (self.conv1(out))  # [B, 32, 16. 16]
-        out_1 = (self.conv2(out_0))  # [B, 64, 8, 8]
-        out_2 = self.att(out_1)
-        out_3 = (self.conv3(out_2))  # [B, 128, 4, 4]
-        out_4 = (self.conv4(out_3))  # [B, 128, 2, 2]
-        out_5 = (self.res_block(out_4))
+        out_0 = (self.conv1(out))  # [B, 64, 128, 128]
+        out_1 = (self.conv2(out_0))  # [B, 128, 64, 64]
+        out_2 = (self.conv3(out_1))  # [B, 256, 32, 32]
+        out_3 = self.att(out_2)
+        out_4 = (self.conv4(out_3))  # [B, 512, 16, 16]
+        out_5 = (self.conv5(out_4))  # [B, 512, 8, 8]
+        out_6 = (self.conv6(out_5))  # [B, 512, 4, 4]
+        out_7 = (self.res_block(out_6))
 
         # Vectorize
-        out = F.relu(self.pooling(out_5)).view(-1, 128, 1)  # [B, 128, 1]
+        out = F.relu(self.pooling(out_5)).view(-1, 512, 1)  # [B, 512, 1]
 
         # Calculate Realism Score
         _out = out.transpose(1, 2)  # [B, 1, 128]
-        _W_i = (self.W[:, i].unsqueeze(-1)).transpose(0, 1)  # [B, 128, 1]
+        _W_i = (self.W[:, i].unsqueeze(-1)).transpose(0, 1)  # [B, 512, 1]
         out = torch.bmm(_out, _W_i + self.w_0) + self.b
 
         out = out.reshape(x.shape[0])
         # out = torch.tanh(out)
 
-        return out, [out_0, out_1, out_2, out_3, out_4, out_5]
+        return out, [out_0, out_1, out_2, out_3, out_4, out_5, out_6, out_7]

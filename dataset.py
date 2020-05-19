@@ -1,9 +1,16 @@
 import os
+import sys
 import random
+import logging
+import functools
+from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime
+from itertools import count
 import numpy as np
 from scipy import interpolate
 import pickle as pkl
 from tqdm import tqdm, trange
+from numba import njit
 
 import torch
 from torch.utils.data import Dataset
@@ -16,9 +23,9 @@ import args
 
 class WindShear:
     def __init__(self, vx, vy):
-        self.v = np.vstack((vx, vy, 0))
+        self.v = np.array([vx, vy, 0])
 
-    def get(self, pos):
+    def get(self, x, y, z):
         return self.v
 
 
@@ -54,30 +61,22 @@ class WindUpdraft:
         # Height of the updraft center
         self.hc = self.get_terrain_height(*center)
 
-    def get(self, pos):
-        basewindvel = self.basewind.get(pos)
-        pos = np.squeeze(pos)
-        (x, y), h = pos[:2], -pos[2]
-        hr = h - self.get_terrain_height(x, y)
-        hr = 2 * hr
+    def get(self, x, y, z):
+        basewindvel = self.basewind.get(x, y, z)
+        h = -z
+        hr = h - self.get_terrain_height(x, y).squeeze()
+        # hr = 2 * hr
         hw = h - self.hc
         xc, yc = self.get_center(hw)
         assert hr >= 0 and hw >= 0
 
         wx, wy = basewindvel[:2]
-        ws = np.sqrt(wx ** 2 + wy ** 2)  # Wind speed
-        wa = np.arctan2(wy, wx)  # Wind angle
-        xr, yr = x - xc, y - yc
-        xrr = np.cos(wa) * xr + np.sin(wa) * yr
-        yrr = -np.sin(wa) * xr + np.cos(wa) * yr
-        a, b = 1 + 0.03 * ws, 1
-        c = (xrr / a)**2 + (yrr / b)**2
-        x = np.sqrt(c) * a + xc
-        y = yc
 
-        w = self.get_updraft(
-            x, y, hr, xc, yc, zi=self.zi, wast=self.wast, A=self.A)
-        return np.vstack((0, 0, -w)) + basewindvel
+        zratio, r, r1, r2 = _get_params(x, y, hr, xc, yc, wx, wy, zi=self.zi)
+        ks = self.kfun(r1 / r2).squeeze()
+        w = _get_updraft(
+            zratio, r, r1, r2, ks=ks, wast=self.wast, A=self.A)
+        return np.array([0, 0, -w]) + basewindvel
 
     def is_valid_height(self, x, y, h):
         return h >= self.get_terrain_height(x, y) and h >= self.hc
@@ -96,41 +95,57 @@ class WindUpdraft:
         center = self.center
         if self.basewind:
             h = hw + self.hc
-            pos = np.vstack((0, 0, -h))
-            basewindvel = self.basewind.get(pos).squeeze()[:2]
+            basewindvel = self.basewind.get(0, 0, -h)[:2]
             center = center + basewindvel * ratio
         return center
 
-    def get_updraft(self, x, y, z, xc, yc, A, zi, wast):
-        """z is altitude"""
-        zratio = z / zi
-        r2 = max(10, 0.102 * zratio**(1/3) * (1 - 0.25 * zratio) * zi)
-        r1 = (0.0011 * r2 + 0.14 if r2 < 600 else 0.8) * r2
-        r = np.sqrt((x - xc)**2 + (y - yc)**2)
-        k1, k2, k3, k4 = self.kfun(r1 / r2).squeeze()
-        N = 1
 
-        wbar = wast * zratio**(1/3) * (1 - 1.1 * zratio)
-        wpeak = wbar * 3 * r2**2 * (r2 - r1) / (r2**3 - r1**3)
+@njit
+def _get_params(x, y, z, xc, yc, wx, wy, zi):
+    ws = np.sqrt(wx ** 2 + wy ** 2)  # Wind speed
+    wa = np.arctan2(wy, wx)  # Wind angle
+    xr, yr = x - xc, y - yc
+    xrr = np.cos(wa) * xr + np.sin(wa) * yr
+    yrr = -np.sin(wa) * xr + np.cos(wa) * yr
+    a, b = 1 + 0.03 * ws, 1
+    c = (xrr / a)**2 + (yrr / b)**2
+    x = np.sqrt(c) * a + xc
+    y = yc
 
-        is_zratio_in = zratio > 0.5 and zratio < 0.9
+    zratio = z / zi
+    r2 = max(10., 0.102 * zratio**(1/3) * (1 - 0.25 * zratio) * zi)
+    r1 = (0.0011 * r2 + 0.14 if r2 < 600 else 0.8) * r2
+    r = np.sqrt((x - xc)**2 + (y - yc)**2)
+    return zratio, r, r1, r2
 
-        if r > r1 and r < 2 * r2 and is_zratio_in:
-            wD = wbar * 5 * np.pi / 12 * (zratio - 0.5) * np.sin(np.pi * r / r2)
-        else:
-            wD = 0
 
-        if is_zratio_in:
-            wemult = 1 - 2.5 * (zratio - 0.5)
-        else:
-            wemult = 1
+@njit
+def _get_updraft(zratio, r, r1, r2, ks, A, wast):
+    """z is altitude"""
+    k1, k2, k3, k4 = ks
+    N = 1
 
-        we = - wbar * N * np.pi * r2**2 / (A - N * np.pi * r2**2) * wemult
-        w = (
-            1 / (1 + np.abs(k1 * r / r2 + k3)**k2)
-            + k4 * r / r2 + wD
-        ) * (wpeak - we) + we
-        return w
+    wbar = wast * zratio**(1/3) * (1 - 1.1 * zratio)
+    wpeak = wbar * 3 * r2**2 * (r2 - r1) / (r2**3 - r1**3)
+
+    is_zratio_in = zratio > 0.5 and zratio < 0.9
+
+    if r > r1 and r < 2 * r2 and is_zratio_in:
+        wD = wbar * 5 * np.pi / 12 * (zratio - 0.5) * np.sin(np.pi * r / r2)
+    else:
+        wD = 0
+
+    if is_zratio_in:
+        wemult = 1 - 2.5 * (zratio - 0.5)
+    else:
+        wemult = 1
+
+    we = - wbar * N * np.pi * r2**2 / (A - N * np.pi * r2**2) * wemult
+    w = (
+        1 / (1 + np.abs(k1 * r / r2 + k3)**k2)
+        + k4 * r / r2 + wD
+    ) * (wpeak - we) + we
+    return w
 
 
 class UpdraftDataset(Dataset):
@@ -177,87 +192,144 @@ class ToTensor:
 
 
 def generate():
+    if not os.path.isdir(args.LOG_DIR):
+        os.makedirs(args.LOG_DIR)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        filename=os.path.join(args.LOG_DIR, f"{datetime.now():%Y%m%d}.log"),
+        format="[%(asctime)s][%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S"
+    )
+    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+
+    logging.info("===== DATA-GENERATION =====")
+
+    max_workers = os.cpu_count()
+
+    logging.info(
+        f"Videos: {args.VIDEONUM} "
+        f"Frames: {args.FRAMENUM} "
+        f"Image Size: {args.GRIDSIZE}x{args.GRIDSIZE} "
+        f"Worker: {max_workers}"
+    )
+
+    with ProcessPoolExecutor(max_workers) as p:
+        list(tqdm(
+            p.map(gen_video, range(args.VIDEONUM)),
+            total=args.VIDEONUM
+        ))
+
+
+def gen_video(video_id):
+    np.random.seed(video_id)
+    t0 = datetime.now()
+
     # Terrain
     terrain = Terrain()
 
     MAPSIZE = args.MAPSIZE
-    PIXSIZE = 2 * MAPSIZE / (args.GRIDSIZE - 1)
+    LANDMARK_RANGE = 2 * MAPSIZE / (args.GRIDSIZE - 1) * np.sqrt(2) / 2
 
     hrlist = np.linspace(0, 300, args.FRAMENUM)  # relative heights
 
-    for file_id in trange(args.VIDEONUM):
-        # Define an identity
-        while True:
-            # Map (random location)
-            mapcenter = np.random.uniform(-MAPSIZE, MAPSIZE, size=2)
+    MAPSIZE = args.MAPSIZE
+    # Define an identity
+    for cnt in count(1):
+        # Map (random location)
+        mapcenter = np.random.uniform(-MAPSIZE, MAPSIZE, size=2)
 
-            # mapcenter = np.random.rand(2) * 2 * MAPSIZE
-            xlim = mapcenter[0] + np.array((-MAPSIZE, MAPSIZE)) / 2
-            ylim = mapcenter[1] + np.array((-MAPSIZE, MAPSIZE)) / 2
-            xgrid = np.linspace(*xlim, args.GRIDSIZE)
-            ygrid = np.linspace(*ylim, args.GRIDSIZE)
-            xmap, ymap = np.meshgrid(xgrid, ygrid)
+        # mapcenter = np.random.rand(2) * 2 * MAPSIZE
+        xlim = mapcenter[0] + np.array((-MAPSIZE, MAPSIZE)) / 2
+        ylim = mapcenter[1] + np.array((-MAPSIZE, MAPSIZE)) / 2
+        xgrid = np.linspace(*xlim, args.GRIDSIZE)
+        ygrid = np.linspace(*ylim, args.GRIDSIZE)
+        xmap, ymap = np.meshgrid(xgrid, ygrid)
 
-            # Wind (random base velocity, and random updraft center)
-            basewindvel = np.random.randn(2) * 9
-            basewind = WindShear(*basewindvel)
-            windcenter = mapcenter + np.random.uniform(-MAPSIZE/5, MAPSIZE/5, size=2)
-            wind = WindUpdraft(A=MAPSIZE**2, center=windcenter,
-                               basewind=basewind, terrain=terrain)
+        # Wind (random base velocity, and random updraft center)
+        basewindvel = np.random.randn(2) * 9
+        basewind = WindShear(*basewindvel)
+        windcenter = (
+            mapcenter
+            + np.random.uniform(-MAPSIZE/5, MAPSIZE/5, size=2))
+        wind = WindUpdraft(A=MAPSIZE**2, center=windcenter,
+                           basewind=basewind, terrain=terrain)
 
-            # Check validity of the wind center
-            h = terrain.get_height(*windcenter)
-            validmap = np.vectorize(wind.is_valid_height)(xmap, ymap, h)
-            if np.sum(validmap) / validmap.size > 0.4:
-                break
+        # Check validity of the wind center
+        h = terrain.get_height(*windcenter)
+        validmap = np.vectorize(wind.is_valid_height)(xmap, ymap, h)
+        if np.sum(validmap) / validmap.size > 0.4:
+            break
 
-        frames = np.zeros(hrlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
-        landmarks = np.zeros(hrlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
+    logging.info(
+        f"Video {video_id + 1:02d}/{args.VIDEONUM} | "
+        f"find a valid configuration in {cnt} tries..."
+    )
 
-        hlist = terrain.get_height(*windcenter) + hrlist
-        for k, h in enumerate(tqdm(hlist)):
-            r = np.random.rand()
-            xc, yc = wind.get_center(h - wind.hc)
-            d = (1 - r) * xc + r * yc
-            for i, j in np.ndindex(xmap.shape):
-                x, y = xmap[i, j], ymap[i, j]
+    frames = np.zeros(hrlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
+    landmarks = np.zeros(hrlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
 
-                is_valid = wind.is_valid_height(x, y, h)
-                if is_valid:
-                    pos = np.vstack((x, y, -h))
-                    wvel = wind.get(pos)
-                else:
-                    wvel = np.ones((3, 1)) * args.NANVALUE
+    hlist = terrain.get_height(*windcenter) + hrlist
+    for k, h in enumerate(hlist):
+        r = np.random.rand()
+        xc, yc = wind.get_center(h - wind.hc)
+        d = (1 - r) * xc + r * yc
+        for i, j in np.ndindex(xmap.shape):
+            x, y = xmap[i, j], ymap[i, j]
 
-                frames[k, :, i, j] = np.vstack((wvel, h, is_valid)).squeeze()
+            is_valid = wind.is_valid_height(x, y, h)
+            if is_valid:
+                wvel = wind.get(x, y, -h)
+            else:
+                wvel = args.NANVALUE
 
-                # Landmark
-                is_landmark = abs((1 - r)*x + r*y - d) < PIXSIZE * np.sqrt(2)/2
-                if is_landmark and is_valid:
-                    lmvel = wvel
-                    is_landmark = True
-                else:
-                    lmvel = np.ones((3, 1)) * args.NANVALUE
-                    is_landmark = False
+            frames[k, :3, i, j] = wvel
+            frames[k, 3, i, j] = h
+            frames[k, 4, i, j] = is_valid
 
-                landmarks[k, :, i, j] = np.vstack((lmvel, h, is_landmark)).squeeze()
+            # Landmark
+            is_landmark = abs((1 - r)*x + r*y - d) < LANDMARK_RANGE
+            if is_landmark and is_valid:
+                lmvel = wvel
+                is_landmark = True
+            else:
+                lmvel = args.NANVALUE
+                is_landmark = False
 
-        # plot(terrain, xmap, ymap, frames, landmarks)
+            landmarks[k, :3, i, j] = lmvel
+            landmarks[k, 3, i, j] = h
+            landmarks[k, 4, i, j] = is_landmark
 
-        # Save
-        path = os.path.join("data", "video")
-        if not os.path.isdir(path):
-            os.makedirs(path)
+        if (k + 1) % int(args.FRAMENUM / 10) == 0 or k == 0:
+            logging.info(
+                f"Video {video_id + 1:02d}/{args.VIDEONUM} "
+                f"[{k + 1:03d}/{args.FRAMENUM}] | "
+                f"Time: {datetime.now() - t0}"
+            )
 
-        video_id = f"VID_{file_id:05d}"
-        data = []
-        for frame, landmark in zip(frames, landmarks):
-            data.append({
-                "frame": frame,
-                "landmarks": landmark,
-            })
-        filename = f"{video_id}.vid"
-        pkl.dump(data, open(os.path.join(path, filename), "wb"))
+    # plot(terrain, xmap, ymap, frames, landmarks)
+
+    # Save
+    path = os.path.join("data", "video")
+    if not os.path.isdir(path):
+        os.makedirs(path)
+
+    data = []
+    for frame, landmark in zip(frames, landmarks):
+        data.append({
+            "frame": frame,
+            "landmarks": landmark,
+        })
+
+    filename = f"VID_{video_id:02d}.vid"
+    path = os.path.join(path, filename), "wb"
+    pkl.dump(data, open(path))
+
+    logging.info(
+        f"Video {video_id + 1:02d}/{args.VIDEONUM} [Finished] | "
+        f"Time: {datetime.now() - t0} | "
+        f"Saved: {path}"
+    )
 
 
 def plot(terrain, xmap, ymap, frames, landmarks):

@@ -23,9 +23,9 @@ def main():
 
     logging.basicConfig(
         level=logging.INFO,
-        filename=os.path.join(args.LOG_DIR, f'{datetime.now():%Y%m%d}.log'),
-        format='[%(asctime)s][%(levelname)s] %(message)s',
-        datefmt='%H:%M:%S'
+        filename=os.path.join(args.LOG_DIR, f"{datetime.now():%Y%m%d}.log"),
+        format="[%(asctime)s][%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S"
     )
 
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
