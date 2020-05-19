@@ -46,17 +46,29 @@ class Embedder(nn.Module):
 
         self.pooling = nn.AdaptiveMaxPool2d((1, 1))
 
+        self.fc = nn.Sequential(
+            nn.Linear(1, 32),
+            nn.ReLU(),
+            nn.Linear(32, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, args.E_VECTOR_LENGTH),
+        )
+
         self.apply(weights_init)
 
         set_device(self)
 
-    def forward(self, x, y):
-        # x, y: [BxK, 5, 32, 32]
+    def forward(self, x, y, h):
+        # x, y: [BxK, 4, 32, 32]
+        # h: [BxK, 1]
         assert x.dim() == 4 and x.shape[1] == args.CHANNEL
         assert x.shape == y.shape
 
         x = x.to(self.device)
         y = y.to(self.device)
+        h = h.to(self.device)
 
         out = torch.cat((x, y), dim=1)  # [BxK, 10, 32, 32]
 
@@ -69,10 +81,12 @@ class Embedder(nn.Module):
         out = (self.conv5(out))  # [BxK, 512, 8, 8]
         out = (self.conv6(out))  # [BxK, 512, 4, 4]
 
-        # Vectorize
+        # Vectorize [BxK, E_VECTOR_LENGTH]
         out = F.relu(self.pooling(out).view(-1, args.E_VECTOR_LENGTH))
 
-        return out
+        out2 = self.fc(h)  # [BxK, E_VECTOR_LENGTH]
+
+        return out + out2
 
 
 class Generator(nn.Module):
@@ -151,9 +165,10 @@ class Generator(nn.Module):
 
         set_device(self)
 
-    def forward(self, y, e):
+    def forward(self, y, h, e):
         e = e.to(self.device)
         y = y.to(self.device)
+        h = h.to(self.device)
 
         out = y  # [B, 5, 32, 32]
 
@@ -163,27 +178,38 @@ class Generator(nn.Module):
         psi_hat = torch.bmm(P, e.unsqueeze(2)).squeeze(2)
 
         # Encode
-        out = self.in1_e(self.conv1(out))  # [B, 32, 16, 16]
-        out = self.in2_e(self.conv2(out))  # [B, ]
+        out = self.in1_e(self.conv1(out))  # [B, 64, 128, 128]
+        out = self.in2_e(self.conv2(out))  # [B, 128, 64, 64]
+        out = self.in3_e(self.conv3(out))  # [B, 256, 32, 32]
         out = self.att1(out)
-        out = self.in3_e(self.conv3(out))  # [B, ]
-        out = self.in4_e(self.conv4(out))  # [B, ]
+        out = self.in4_e(self.conv4(out))  # [B, 512, 16, 16]
+        out = self.in5_e(self.conv5(out))  # [B, 512, 8, 8]
+        out = self.in6_e(self.conv6(out))  # [B, 512, 4, 4]
 
         # Residual layers
         out = self.res1(out, *self.slice_psi(psi_hat, 'res1'))
         out = self.res2(out, *self.slice_psi(psi_hat, 'res2'))
         out = self.res3(out, *self.slice_psi(psi_hat, 'res3'))
+        out = self.res4(out, *self.slice_psi(psi_hat, 'res4'))
+        out = self.res5(out, *self.slice_psi(psi_hat, 'res5'))
 
         # Decode
-        out = self.in4_d(self.deconv4(out, *self.slice_psi(psi_hat, 'deconv4')))
-        out = self.in3_d(self.deconv3(out, *self.slice_psi(psi_hat, 'deconv3')))
+        out = self.in6_d(self.deconv6(
+            out, *self.slice_psi(psi_hat, 'deconv6')))  # [B, 512, 4, 4]
+        out = self.in5_d(self.deconv5(
+            out, *self.slice_psi(psi_hat, 'deconv5')))  # [B, 512, 16, 16]
+        out = self.in4_d(self.deconv4(
+            out, *self.slice_psi(psi_hat, 'deconv4')))  # [B, 256, 32, 32]
+        out = self.in3_d(self.deconv3(
+            out, *self.slice_psi(psi_hat, 'deconv3')))  # [B, 128, 64, 64]
         out = self.att2(out)
-        out = self.in2_d(self.deconv2(out, *self.slice_psi(psi_hat, 'deconv2')))
-        out = self.in1_d(self.deconv1(out, *self.slice_psi(psi_hat, 'deconv1')))
+        out = self.in2_d(self.deconv2(
+            out, *self.slice_psi(psi_hat, 'deconv2')))  # [B, 64, 128, 128]
+        out = self.in1_d(self.deconv1(
+            out, *self.slice_psi(psi_hat, 'deconv1')))  # [B, 3, 256, 256]
 
         out[:, :3, ...] = torch.tanh(out[:, :3, ...]) * 10
-        out[:, 3, ...] = torch.sigmoid(out[:, 3, ...]) * 600
-        out[:, 4, ...] = torch.sigmoid(out[:, 4, ...])
+        out[:, 3, ...] = torch.sigmoid(out[:, 3, ...])
 
         return out
 

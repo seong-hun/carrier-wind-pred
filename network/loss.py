@@ -23,9 +23,9 @@ class LossEG(nn.Module):
 
     def loss_cnt(self, x, x_hat):
         IMG_NET_MEAN = torch.Tensor([
-            0, 0, 0, 300, 0.5]).reshape([1, args.CHANNEL, 1, 1]).to(x.device)
+            0, 0, 0, 0.5]).reshape([1, args.CHANNEL, 1, 1]).to(x.device)
         IMG_NET_STD = torch.Tensor([
-            2, 2, 3, 100, 0.3]).reshape([1, args.CHANNEL, 1, 1]).to(x.device)
+            2, 2, 3, 0.3]).reshape([1, args.CHANNEL, 1, 1]).to(x.device)
 
         x = (x - IMG_NET_MEAN) / IMG_NET_STD
         x_hat = (x_hat - IMG_NET_MEAN) / IMG_NET_STD
@@ -50,12 +50,12 @@ class LossEG(nn.Module):
             vgg19_loss * args.LOSS_VGG19_WEIGHT
             + vgg_face_loss * args.LOSS_VGG_FACE_WEIGHT)
 
-        # Height and mask loss
-        hm_loss = F.l1_loss(
-            x[:, 3:, ...].reshape(-1),
-            x_hat[:, 3:, ...].reshape(-1)) * args.LOSS_HEIGHT_WEIGHT
+        # Mask loss
+        mask_loss = F.l1_loss(
+            x[:, 3, ...].reshape(-1),
+            x_hat[:, 3, ...].reshape(-1)) * args.LOSS_MASK_WEIGHT
 
-        return vgg_loss + hm_loss
+        return vgg_loss + mask_loss
 
     def loss_adv(self, r_x_hat):
         return -r_x_hat.mean()

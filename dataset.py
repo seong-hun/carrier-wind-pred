@@ -91,7 +91,7 @@ class WindUpdraft:
         """z is altitude"""
         # Expected maximum horizontal wind speed: 6 m/s
         # Expected maximum shifted center of the updraft: 150 m
-        ratio = 100 / 6 * np.tanh(hw / 300)
+        ratio = 300 / 6 * np.tanh(hw / 300)
         center = self.center
         if self.basewind:
             h = hw + self.hc
@@ -172,17 +172,22 @@ class UpdraftDataset(Dataset):
         data = random.sample(data, args.K + 1)
 
         data_array = []
+        h_array = []
         for d in data:
             x = d["frame"]
-            y = d["landmarks"]
+            y = d["landmark"]
+            h = d["height"]
             if self.transform:
                 x = self.transform(x)
                 y = self.transform(y)
+                h = torch.tensor(h)
             assert torch.is_tensor(x)
             data_array.append(torch.stack((x, y)))
+            h_array.append(h)
         data_array = torch.stack(data_array)
+        h_array = torch.stack(h_array)
 
-        return idx, data_array
+        return idx, data_array, h_array
 
 
 class ToTensor:
@@ -192,25 +197,8 @@ class ToTensor:
 
 
 def generate():
-    if not os.path.isdir(args.LOG_DIR):
-        os.makedirs(args.LOG_DIR)
-
-    logging.basicConfig(
-        level=logging.INFO,
-        filename=os.path.join(args.LOG_DIR, f"{datetime.now():%Y%m%d}.log"),
-        format="[%(asctime)s][%(levelname)s] %(message)s",
-        datefmt="%H:%M:%S"
-    )
-    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
-
-    logging.info("===== DATA-GENERATION =====")
-
     max_workers = os.cpu_count()
-
     logging.info(
-        f"Videos: {args.VIDEONUM} "
-        f"Frames: {args.FRAMENUM} "
-        f"Image Size: {args.GRIDSIZE}x{args.GRIDSIZE} "
         f"Worker: {max_workers}"
     )
 
@@ -229,7 +217,6 @@ def gen_video(video_id):
     terrain = Terrain()
 
     MAPSIZE = args.MAPSIZE
-    LANDMARK_RANGE = 2 * MAPSIZE / (args.GRIDSIZE - 1) * np.sqrt(2) / 2
 
     hrlist = np.linspace(0, 300, args.FRAMENUM)  # relative heights
 
@@ -257,23 +244,28 @@ def gen_video(video_id):
 
         # Check validity of the wind center
         h = terrain.get_height(*windcenter)
+        hw = h + hrlist[-1] - wind.hc
+        center_at_h = wind.get_center(hw)
         validmap = np.vectorize(wind.is_valid_height)(xmap, ymap, h)
+        lim = np.vstack((xlim, ylim)).T
         if np.sum(validmap) / validmap.size > 0.4:
-            break
+            if (center_at_h < lim[1]).all() and (center_at_h > lim[0]).all():
+                break
 
     logging.info(
-        f"Video {video_id + 1:02d}/{args.VIDEONUM} | "
+        f"Video {video_id + 1:02d}/{args.VIDEONUM:02d} | "
         f"find a valid configuration in {cnt} tries..."
     )
 
-    frames = np.zeros(hrlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
-    landmarks = np.zeros(hrlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
+    frames = np.zeros(hrlist.shape + (4, ) + xmap.shape)  # [K, C, W, H]
+    landmarks = np.zeros(hrlist.shape + (4, ) + xmap.shape)  # [K, C, W, H]
 
     hlist = terrain.get_height(*windcenter) + hrlist
     for k, h in enumerate(hlist):
         r = np.random.rand()
         xc, yc = wind.get_center(h - wind.hc)
-        d = (1 - r) * xc + r * yc
+        c = (1 - r) * xc + r * yc
+        d = args.LANDMARK_RANGE**2 * ((1 - r)**2 + r**2)**2
         for i, j in np.ndindex(xmap.shape):
             x, y = xmap[i, j], ymap[i, j]
 
@@ -284,11 +276,10 @@ def gen_video(video_id):
                 wvel = args.NANVALUE
 
             frames[k, :3, i, j] = wvel
-            frames[k, 3, i, j] = h
-            frames[k, 4, i, j] = is_valid
+            frames[k, 3, i, j] = is_valid
 
             # Landmark
-            is_landmark = abs((1 - r)*x + r*y - d) < LANDMARK_RANGE
+            is_landmark = ((1 - r) * x + r * y - c)**2 < d
             if is_landmark and is_valid:
                 lmvel = wvel
                 is_landmark = True
@@ -297,17 +288,17 @@ def gen_video(video_id):
                 is_landmark = False
 
             landmarks[k, :3, i, j] = lmvel
-            landmarks[k, 3, i, j] = h
-            landmarks[k, 4, i, j] = is_landmark
+            landmarks[k, 3, i, j] = is_landmark
 
-        if (k + 1) % int(args.FRAMENUM / 10) == 0 or k == 0:
+        if (k + 1) % (int(args.FRAMENUM / 10) or 1) == 0 or k == 0:
             logging.info(
-                f"Video {video_id + 1:02d}/{args.VIDEONUM} "
-                f"[{k + 1:03d}/{args.FRAMENUM}] | "
+                f"Video {video_id + 1:02d}/{args.VIDEONUM:02d} "
+                f"[{k + 1:03d}/{args.FRAMENUM:03d}] | "
                 f"Time: {datetime.now() - t0}"
             )
 
-    # plot(terrain, xmap, ymap, frames, landmarks)
+    # plot(terrain, xmap, ymap, frames, landmarks, hlist)
+    # breakpoint()
 
     # Save
     path = os.path.join("data", "video")
@@ -315,24 +306,25 @@ def gen_video(video_id):
         os.makedirs(path)
 
     data = []
-    for frame, landmark in zip(frames, landmarks):
+    for frame, landmark, height in zip(frames, landmarks, hlist):
         data.append({
             "frame": frame,
-            "landmarks": landmark,
+            "landmark": landmark,
+            "height": height,
         })
 
     filename = f"VID_{video_id:02d}.vid"
-    path = os.path.join(path, filename), "wb"
-    pkl.dump(data, open(path))
+    path = os.path.join(path, filename)
+    pkl.dump(data, open(path, "wb"))
 
     logging.info(
-        f"Video {video_id + 1:02d}/{args.VIDEONUM} [Finished] | "
+        f"Video {video_id + 1:02d}/{args.VIDEONUM:02d} [Finished] | "
         f"Time: {datetime.now() - t0} | "
         f"Saved: {path}"
     )
 
 
-def plot(terrain, xmap, ymap, frames, landmarks):
+def plot(terrain, xmap, ymap, frames, landmarks, hlist):
     import plotly.colors as colors
     import plotly.graph_objects as go
 
@@ -349,9 +341,9 @@ def plot(terrain, xmap, ymap, frames, landmarks):
     # Wind map & landmarks
     for k in np.linspace(0, len(frames) - 1, 5, dtype="int"):
         # Wind map
-        windmap = -frames[k, 2] + frames[k, 3]
+        windmap = -frames[k, 2] + hlist[k]
         # windmap[windmap <= frames[k, 3]] = np.nan
-        windmap[frames[k, 4] == 0] = np.nan
+        windmap[frames[k, 3] == 0] = np.nan
         windmap_trace = go.Surface(
             x=xmap, y=ymap, z=windmap,
             surfacecolor=-frames[k, 2],
@@ -365,8 +357,8 @@ def plot(terrain, xmap, ymap, frames, landmarks):
         data.append(windmap_trace)
 
         # Landmark
-        landmarkmap = -landmarks[k, 2] + landmarks[k, 3]
-        landmarkmap[landmarks[k, 4] == 0] = np.nan
+        landmarkmap = -landmarks[k, 2] + hlist[k]
+        landmarkmap[landmarks[k, 3] == 0] = np.nan
         landmark_trace = go.Surface(
             x=xmap, y=ymap, z=landmarkmap,
             surfacecolor=-landmarks[k, 2],
@@ -416,5 +408,28 @@ def _plot(xmap, ymap, hmap, hlist, wmap):
     plt.show()
 
 
-if __name__ == "__main__":
+def main():
+    if not os.path.isdir(args.LOG_DIR):
+        os.makedirs(args.LOG_DIR)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        filename=os.path.join(args.LOG_DIR, f"{datetime.now():%Y%m%d}.log"),
+        format="[%(asctime)s][%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S"
+    )
+    logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+
+    logging.info("===== DATA-GENERATION =====")
+    logging.info(
+        f"Videos: {args.VIDEONUM}, "
+        f"Frames: {args.FRAMENUM}, "
+        f"Image Size: {args.GRIDSIZE}x{args.GRIDSIZE}"
+    )
+
     generate()
+    # gen_video(0)
+
+
+if __name__ == "__main__":
+    main()

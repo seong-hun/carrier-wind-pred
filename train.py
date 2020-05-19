@@ -72,27 +72,30 @@ def meta():
         G.train()
         D.train()
 
-        for batch_num, (i, video) in enumerate(dataset):
+        for batch_num, (i, video, h) in enumerate(dataset):
             batch_start = datetime.now()
 
             # video [B, K+1, 2, C, W, H]
             t = video[:, -1, ...]  # [B, 2, C, W, H]
             video = video[:, :-1, ...]  # [B, K, 2, C, W, H]
+            h_t = h[:, -1]  # [B, 1]
+            h = h[:, :-1]  # [B, K]
             dims = video.shape
 
             # Calculate average encoding vector for video
             e_in = video.reshape(dims[0] * dims[1], *dims[2:])  # [BxK, 2, C, W, H]
             x, y = e_in[:, 0, ...], e_in[:, 1, ...]  # [BxK, C, W, H]
-            e_vectors = E(x, y).reshape(dims[0], dims[1], -1)  # [B, K, len(e)]
-            e_hat = e_vectors.mean(dim=1)
+            h = h.reshape(-1, 1)  # [BxK, 1]
+            e_vectors = E(x, y, h).reshape(dims[0], dims[1], -1)  # [B, K, len(e)]
+            e_hat = e_vectors.mean(dim=1)  # [B, len(e)]
 
             # Generate frame using landmarks from frame t
             x_t, y_t = t[:, 0, ...], t[:, 1, ...]
-            x_hat = G(y_t, e_hat)
+            x_hat = G(y_t, h_t, e_hat)
 
             # Optimzie E_G and D
-            r_x_hat, _ = D(x_hat, y_t, i)
-            r_x, _ = D(x_t, y_t, i)
+            r_x_hat, _ = D(x_hat, y_t, h_t, i)
+            r_x, _ = D(x_t, y_t, h_t, i)
 
             optimizer_E_G.zero_grad()
             optimizer_D.zero_grad()
@@ -109,9 +112,9 @@ def meta():
                     breakpoint()
 
             # Optimize D again
-            x_hat = G(y_t, e_hat).detach()
-            r_x_hat, _ = D(x_hat, y_t, i)
-            r_x, _ = D(x_t, y_t, i)
+            x_hat = G(y_t, h_t, e_hat).detach()
+            r_x_hat, _ = D(x_hat, y_t, h_t, i)
+            r_x, _ = D(x_t, y_t, h_t, i)
 
             optimizer_D.zero_grad()
             loss_D = criterion_D(r_x, r_x_hat)
