@@ -91,30 +91,38 @@ def meta():
 
             # Generate frame using landmarks from frame t
             x_t, y_t = t[:, 0, ...], t[:, 1, ...]
-            x_hat = G(y_t, e_hat)
 
-            # Optimzie E_G and D
+            # Train D
+            optimizer_D.zero_grad()
+            x_hat = G(y_t, e_hat).detach()
             r_x_hat, _ = D(x_hat, y_t, i)
             r_x, _ = D(x_t, y_t, i)
-
-            optimizer_E_G.zero_grad()
-            optimizer_D.zero_grad()
-            loss_E_G = criterion_E_G(
-                x_t, y_t, x_hat, r_x_hat, e_hat, D.W[:, i].transpose(1, 0))
             loss_D = criterion_D(r_x, r_x_hat)
-            loss = loss_E_G + loss_D
-            loss.backward()
-
-            for k, v in G.named_parameters():
-                if torch.isnan(v.grad).any():
-                    breakpoint()
+            loss_D.backward()
 
             for k, v in D.named_parameters():
                 if torch.isnan(v.grad).any():
                     breakpoint()
 
-            optimizer_E_G.step()
             optimizer_D.step()
+
+            # Train G
+            optimizer_E_G.zero_grad()
+            x_hat = G(y_t, e_hat)
+            r_x_hat, _ = D(x_hat, y_t, i)
+            loss_E_G = criterion_E_G(
+                x_t, y_t, x_hat, r_x_hat, e_hat, D.W[:, i].transpose(1, 0))
+            loss_E_G.backward()
+
+            for k, v in E.named_parameters():
+                if torch.isnan(v.grad).any():
+                    breakpoint()
+
+            for k, v in G.named_parameters():
+                if torch.isnan(v.grad).any():
+                    breakpoint()
+
+            optimizer_E_G.step()
 
             # Optimize D again
             x_hat = G(y_t, e_hat).detach()

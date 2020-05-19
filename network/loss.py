@@ -22,42 +22,45 @@ class LossEG(nn.Module):
         set_device(self)
 
     def loss_cnt(self, x, x_hat):
-        IMG_NET_MEAN = torch.Tensor([
-            0, 0, 0, 0.3, 0.3]).reshape(
-                [1, args.CHANNEL, 1, 1]).to(self.device)
-        IMG_NET_STD = torch.Tensor([
-            0.3, 0.3, 0.3, 0.2, 0.3]).reshape(
-                [1, args.CHANNEL, 1, 1]).to(self.device)
+        return F.l1_loss(x.reshape(-1), x_hat.reshape(-1))
 
-        x = (x - IMG_NET_MEAN) / IMG_NET_STD
-        x_hat = (x_hat - IMG_NET_MEAN) / IMG_NET_STD
+    # def loss_cnt(self, x, x_hat):
+    #     IMG_NET_MEAN = torch.Tensor([
+    #         0, 0, 0, 0.3, 0.3]).reshape(
+    #             [1, args.CHANNEL, 1, 1]).to(self.device)
+    #     IMG_NET_STD = torch.Tensor([
+    #         0.3, 0.3, 0.3, 0.2, 0.3]).reshape(
+    #             [1, args.CHANNEL, 1, 1]).to(self.device)
 
-        # VGG19 Loss
-        vgg19_x_hat = self.VGG19_AC(x_hat[:, :3, ...])
-        vgg19_x = self.VGG19_AC(x[:, :3, ...])
+    #     x = (x - IMG_NET_MEAN) / IMG_NET_STD
+    #     x_hat = (x_hat - IMG_NET_MEAN) / IMG_NET_STD
 
-        vgg19_loss = 0
-        for i in range(0, len(vgg19_x)):
-            vgg19_loss += F.l1_loss(vgg19_x_hat[i], vgg19_x[i])
+    #     # VGG19 Loss
+    #     vgg19_x_hat = self.VGG19_AC(x_hat[:, :3, ...])
+    #     vgg19_x = self.VGG19_AC(x[:, :3, ...])
 
-        # VGG Face Loss
-        vgg_face_x_hat = self.VGG_FACE_AC(x_hat[:, :3, ...])
-        vgg_face_x = self.VGG_FACE_AC(x[:, :3, ...])
+    #     vgg19_loss = 0
+    #     for i in range(0, len(vgg19_x)):
+    #         vgg19_loss += F.l1_loss(vgg19_x_hat[i], vgg19_x[i])
 
-        vgg_face_loss = 0
-        for i in range(0, len(vgg_face_x)):
-            vgg_face_loss += F.l1_loss(vgg_face_x_hat[i], vgg_face_x[i])
+    #     # VGG Face Loss
+    #     vgg_face_x_hat = self.VGG_FACE_AC(x_hat[:, :3, ...])
+    #     vgg_face_x = self.VGG_FACE_AC(x[:, :3, ...])
 
-        vgg_loss = (
-            vgg19_loss * args.LOSS_VGG19_WEIGHT
-            + vgg_face_loss * args.LOSS_VGG_FACE_WEIGHT)
+    #     vgg_face_loss = 0
+    #     for i in range(0, len(vgg_face_x)):
+    #         vgg_face_loss += F.l1_loss(vgg_face_x_hat[i], vgg_face_x[i])
 
-        # Mask loss
-        mask_loss = F.l1_loss(
-            x[:, 3, ...].reshape(-1),
-            x_hat[:, 3, ...].reshape(-1)) * args.LOSS_MASK_WEIGHT
+    #     vgg_loss = (
+    #         vgg19_loss * args.LOSS_VGG19_WEIGHT
+    #         + vgg_face_loss * args.LOSS_VGG_FACE_WEIGHT)
 
-        return vgg_loss + mask_loss
+    #     # Mask loss
+    #     mask_loss = F.l1_loss(
+    #         x[:, 3, ...].reshape(-1),
+    #         x_hat[:, 3, ...].reshape(-1)) * args.LOSS_MASK_WEIGHT
+
+    #     return vgg_loss + mask_loss
 
     def loss_adv(self, r_x_hat):
         return -r_x_hat.mean()
