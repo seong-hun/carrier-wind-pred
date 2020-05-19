@@ -23,9 +23,11 @@ class LossEG(nn.Module):
 
     def loss_cnt(self, x, x_hat):
         IMG_NET_MEAN = torch.Tensor([
-            0, 0, 0, 0.5]).reshape([1, args.CHANNEL, 1, 1]).to(x.device)
+            0, 0, 0, 0.3, 0.3]).reshape(
+                [1, args.CHANNEL, 1, 1]).to(self.device)
         IMG_NET_STD = torch.Tensor([
-            2, 2, 3, 0.3]).reshape([1, args.CHANNEL, 1, 1]).to(x.device)
+            0.3, 0.3, 0.3, 0.2, 0.3]).reshape(
+                [1, args.CHANNEL, 1, 1]).to(self.device)
 
         x = (x - IMG_NET_MEAN) / IMG_NET_STD
         x_hat = (x_hat - IMG_NET_MEAN) / IMG_NET_STD

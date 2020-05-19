@@ -149,8 +149,7 @@ def _get_updraft(zratio, r, r1, r2, ks, A, wast):
 
 
 class UpdraftDataset(Dataset):
-    def __init__(self, root, extension=".vid", shuffle=False,
-                 transform=None, shuffle_frames=False):
+    def __init__(self, root, extension=".vid", transform=None):
         self.files = [
             os.path.join(path, filename)
             for path, dirs, files in os.walk(root)
@@ -161,8 +160,6 @@ class UpdraftDataset(Dataset):
         self.transform = transform
         self.length = len(self.files)
 
-        self.shuffle_frames = shuffle_frames
-
     def __len__(self):
         return self.length
 
@@ -172,22 +169,25 @@ class UpdraftDataset(Dataset):
         data = random.sample(data, args.K + 1)
 
         data_array = []
-        h_array = []
         for d in data:
             x = d["frame"]
             y = d["landmark"]
-            h = d["height"]
             if self.transform:
                 x = self.transform(x)
                 y = self.transform(y)
-                h = torch.tensor(h)
             assert torch.is_tensor(x)
             data_array.append(torch.stack((x, y)))
-            h_array.append(h)
         data_array = torch.stack(data_array)
-        h_array = torch.stack(h_array)
 
-        return idx, data_array, h_array
+        return idx, data_array
+
+
+class NormHeight:
+    def __init__(self):
+        self.factor = np.array([7, 7, 7, 600, 1]).reshape([-1, 1, 1])
+
+    def __call__(self, image):
+        return image / self.factor
 
 
 class ToTensor:
@@ -257,8 +257,9 @@ def gen_video(video_id):
         f"find a valid configuration in {cnt} tries..."
     )
 
-    frames = np.zeros(hrlist.shape + (4, ) + xmap.shape)  # [K, C, W, H]
-    landmarks = np.zeros(hrlist.shape + (4, ) + xmap.shape)  # [K, C, W, H]
+    # C: vx, vy, vz, h, bool
+    frames = np.zeros(hrlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
+    landmarks = np.zeros(hrlist.shape + (5, ) + xmap.shape)  # [K, C, W, H]
 
     hlist = terrain.get_height(*windcenter) + hrlist
     for k, h in enumerate(hlist):
@@ -276,7 +277,8 @@ def gen_video(video_id):
                 wvel = args.NANVALUE
 
             frames[k, :3, i, j] = wvel
-            frames[k, 3, i, j] = is_valid
+            frames[k, 3, i, j] = h
+            frames[k, 4, i, j] = is_valid
 
             # Landmark
             is_landmark = ((1 - r) * x + r * y - c)**2 < d
@@ -288,7 +290,8 @@ def gen_video(video_id):
                 is_landmark = False
 
             landmarks[k, :3, i, j] = lmvel
-            landmarks[k, 3, i, j] = is_landmark
+            landmarks[k, 3, i, j] = h
+            landmarks[k, 4, i, j] = is_landmark
 
         if (k + 1) % (int(args.FRAMENUM / 10) or 1) == 0 or k == 0:
             logging.info(
@@ -297,8 +300,7 @@ def gen_video(video_id):
                 f"Time: {datetime.now() - t0}"
             )
 
-    # plot(terrain, xmap, ymap, frames, landmarks, hlist)
-    # breakpoint()
+    # plot(terrain, xmap, ymap, frames, landmarks)
 
     # Save
     path = os.path.join("data", "video")
@@ -306,11 +308,10 @@ def gen_video(video_id):
         os.makedirs(path)
 
     data = []
-    for frame, landmark, height in zip(frames, landmarks, hlist):
+    for frame, landmark in zip(frames, landmarks):
         data.append({
             "frame": frame,
             "landmark": landmark,
-            "height": height,
         })
 
     filename = f"VID_{video_id:02d}.vid"
@@ -324,7 +325,7 @@ def gen_video(video_id):
     )
 
 
-def plot(terrain, xmap, ymap, frames, landmarks, hlist):
+def plot(terrain, xmap, ymap, frames, landmarks):
     import plotly.colors as colors
     import plotly.graph_objects as go
 
@@ -341,9 +342,9 @@ def plot(terrain, xmap, ymap, frames, landmarks, hlist):
     # Wind map & landmarks
     for k in np.linspace(0, len(frames) - 1, 5, dtype="int"):
         # Wind map
-        windmap = -frames[k, 2] + hlist[k]
+        windmap = -frames[k, 2] + frames[k, 3]
         # windmap[windmap <= frames[k, 3]] = np.nan
-        windmap[frames[k, 3] == 0] = np.nan
+        windmap[frames[k, 4] == 0] = np.nan
         windmap_trace = go.Surface(
             x=xmap, y=ymap, z=windmap,
             surfacecolor=-frames[k, 2],
@@ -357,8 +358,8 @@ def plot(terrain, xmap, ymap, frames, landmarks, hlist):
         data.append(windmap_trace)
 
         # Landmark
-        landmarkmap = -landmarks[k, 2] + hlist[k]
-        landmarkmap[landmarks[k, 3] == 0] = np.nan
+        landmarkmap = -landmarks[k, 2] + landmarks[k, 3]
+        landmarkmap[landmarks[k, 4] == 0] = np.nan
         landmark_trace = go.Surface(
             x=xmap, y=ymap, z=landmarkmap,
             surfacecolor=-landmarks[k, 2],
@@ -428,7 +429,7 @@ def main():
     )
 
     generate()
-    # gen_video(0)
+    # gen_video(1)
 
 
 if __name__ == "__main__":

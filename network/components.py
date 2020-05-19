@@ -15,7 +15,7 @@ def init_conv(conv):
 
 class SelfAttention(nn.Module):
     def __init__(self, in_dim):
-        super(SelfAttention, self).__init__()
+        super().__init__()
 
         self.query_conv = nn.Conv2d(
             in_channels=in_dim, out_channels=in_dim // 8, kernel_size=1)
