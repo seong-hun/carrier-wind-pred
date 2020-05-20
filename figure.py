@@ -15,7 +15,7 @@ E = network.Embedder()
 G = network.Generator()
 
 # DATANUM = "20200514_2113"
-DATANUM = "20200520_0924"
+DATANUM = "20200520_1038"
 train.load_model(E, DATANUM)
 train.load_model(G, DATANUM)
 
@@ -33,6 +33,11 @@ raw_dataset = UpdraftDataset(
 dataset = DataLoader(raw_dataset, batch_size=len(raw_dataset))
 
 for batch_num, (i, video) in enumerate(dataset):
+    # video [B, K+1, 2, C, W, H]
+    # Remove index channel from all video (CHANNEL = 4)
+    real_idx = video[:, -1, 0, args.CHANNEL, :, :]
+    video = video[..., :args.CHANNEL, :, :]
+
     t = video[:, -1, ...]  # [B, 2, C, W, H]
     video = video[:, :-1, ...]  # [B, K, 2, C, W, H]
     dims = video.shape
@@ -58,17 +63,12 @@ for batch_num, (i, video) in enumerate(dataset):
 
     for i, idx in enumerate(goodlist):
         base_img = -video[idx, 0, 0, 2, ...].detach().numpy()
-        base_idx = video[idx, 0, 0, -1, ...].detach().numpy()
         real_img = -x_t[idx, 2, ...].detach().numpy()
-        real_idx = x_t[idx, -1, ...].detach().numpy()
         fake_img = -x_hat[idx, 2, ...].detach().numpy()
         landmark = -y_t[idx, 2, ...].detach().numpy()
 
-        bvmin = base_img[base_idx == 1].min()
-        bvmax = base_img[base_idx == 1].max()
-        vmin = real_img[real_idx == 1].min()
-        vmax = real_img[real_idx == 1].max()
-        bskwargs = dict(vmin=bvmin, vmax=bvmax, cmap="jet")
+        vmin = real_img[real_idx[i] == 1].min()
+        vmax = real_img[real_idx[i] == 1].max()
         kwargs = dict(vmin=vmin, vmax=vmax, cmap="jet")
         axes[i, 0].imshow(base_img, **kwargs)
         axes[i, 1].imshow(landmark, **kwargs)

@@ -79,6 +79,11 @@ def meta():
             batch_start = datetime.now()
 
             # video [B, K+1, 2, C, W, H]
+            # Remove index channel from all video (CHANNEL = 4)
+            video = video[..., :args.CHANNEL, :, :]
+
+            # t: Target
+            # video: for Encoder only
             t = video[:, -1, ...]  # [B, 2, C, W, H]
             video = video[:, :-1, ...]  # [B, K, 2, C, W, H]
             dims = video.shape
@@ -89,7 +94,8 @@ def meta():
             e_vectors = E(x, y).reshape(dims[0], dims[1], -1)  # [B, K, len(e)]
             e_hat = e_vectors.mean(dim=1)  # [B, len(e)]
 
-            # Generate frame using landmarks from frame t
+            # Target frame and landmark
+            # x_t, y_t: [B, C, W, H]
             x_t, y_t = t[:, 0, ...], t[:, 1, ...]
 
             """
@@ -100,7 +106,7 @@ def meta():
             optimizer_E_G.zero_grad()
             optimizer_D.zero_grad()
 
-            x_hat = G(y_t, e_hat)
+            x_hat = G(y_t, e_hat)  # [B, C, W, H]
             r_x_hat, D_hat_res_list = D(x_hat, y_t, i)
 
             with torch.no_grad():
@@ -110,13 +116,13 @@ def meta():
                 x_t, x_hat, r_x_hat, e_hat, D.W[:, i].transpose(1, 0))
             loss_E_G.backward(retain_graph=False)
 
-            for k, v in E.named_parameters():
-                if torch.isnan(v.grad).any():
-                    breakpoint()
+            # for k, v in E.named_parameters():
+            #     if torch.isnan(v.grad).any():
+            #         breakpoint()
 
-            for k, v in G.named_parameters():
-                if torch.isnan(v.grad).any():
-                    breakpoint()
+            # for k, v in G.named_parameters():
+            #     if torch.isnan(v.grad).any():
+            #         breakpoint()
 
             optimizer_E_G.step()
 
@@ -131,9 +137,9 @@ def meta():
             loss_D = criterion_D(r_x, r_x_hat)
             loss_D.backward(retain_graph=False)
 
-            for k, v in D.named_parameters():
-                if torch.isnan(v.grad).any():
-                    breakpoint()
+            # for k, v in D.named_parameters():
+            #     if torch.isnan(v.grad).any():
+            #         breakpoint()
 
             optimizer_D.step()
 
@@ -144,12 +150,14 @@ def meta():
             r_x_hat, D_hat_res_list = D(x_hat, y_t, i)
             r_x, D_res_list = D(x_t, y_t, i)
 
-            loss_D = criterion_D(r_x, r_x_hat)
-            loss_D.backward(retain_graph=False)
+            loss_D2 = criterion_D(r_x, r_x_hat)
+            loss_D2.backward(retain_graph=False)
 
-            for k, v in D.named_parameters():
-                if torch.isnan(v.grad).any():
-                    breakpoint()
+            loss_D += loss_D2
+
+            # for k, v in D.named_parameters():
+            #     if torch.isnan(v.grad).any():
+            #         breakpoint()
 
             optimizer_D.step()
 

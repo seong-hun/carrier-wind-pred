@@ -58,7 +58,7 @@ class Embedder(nn.Module):
         x = x.to(self.device)
         y = y.to(self.device)
 
-        out = torch.cat((x, y), dim=1)  # [BxK, 10, 64, 64]
+        out = torch.cat((x, y), dim=1)  # [BxK, CHANNELx2, 64, 64]
 
         # Encode
         out = (self.conv1(out))  # [BxK, 32, 32, 32]
@@ -156,7 +156,7 @@ class Generator(nn.Module):
         e = e.to(self.device)
         y = y.to(self.device)
 
-        out = y  # [B, 5, 64, 64]
+        out = y  # [B, CHANNEL, 64, 64]
 
         # Calculate psi_hat parameters
         P = self.projection.unsqueeze(0)
@@ -192,11 +192,11 @@ class Generator(nn.Module):
         out = self.in2_d(self.deconv2(
             out, *self.slice_psi(psi_hat, 'deconv2')))  # [B, 32, 32, 32]
         out = self.in1_d(self.deconv1(
-            out, *self.slice_psi(psi_hat, 'deconv1')))  # [B, 4, 64, 64]
+            out, *self.slice_psi(psi_hat, 'deconv1')))  # [B, CHANNEL, 64, 64]
 
-        out[:, :3, ...] = torch.tanh(out[:, :3, ...]) * 10
+        out[:, :3, ...] = torch.tanh(out[:, :3, ...]) * 1.5
         out[:, 3, ...] = torch.sigmoid(out[:, 3, ...])
-        out[:, 4, ...] = torch.sigmoid(out[:, 4, ...])
+        # out[:, 4, ...] = torch.sigmoid(out[:, 4, ...])
 
         return out
 
@@ -224,7 +224,7 @@ class Discriminator(nn.Module):
     def __init__(self, training_videos):
         super().__init__()
 
-        self.conv1 = ResidualBlockDown((args.CHANNEL - 1) * 2, 64)
+        self.conv1 = ResidualBlockDown(args.CHANNEL * 2, 64)
         self.conv2 = ResidualBlockDown(64, 128)
         self.conv3 = ResidualBlockDown(128, 256)
         self.att = SelfAttention(256)
@@ -247,13 +247,11 @@ class Discriminator(nn.Module):
         assert x.dim() == 4 and x.shape[1] == args.CHANNEL
         assert x.shape == y.shape
 
-        x = x[:, :-1, :, :]
-        y = y[:, :-1, :, :]
         x = x.to(self.device)
         y = y.to(self.device)
 
         # Concatenate x & y
-        out = torch.cat((x, y), dim=1)  # [B, 10, 64, 64]
+        out = torch.cat((x, y), dim=1)  # [B, CHANNELx2, 64, 64]
 
         # Encode
         out_0 = (self.conv1(out))  # [B, 64, 32, 32]
