@@ -149,7 +149,8 @@ def _get_updraft(zratio, r, r1, r2, ks, A, wast):
 
 
 class UpdraftDataset(Dataset):
-    def __init__(self, root, extension=".vid", transform=None):
+    def __init__(self, root, extension=".vid", transform=None,
+                 frame_shuffle=True):
         self.files = [
             os.path.join(path, filename)
             for path, dirs, files in os.walk(root)
@@ -159,6 +160,7 @@ class UpdraftDataset(Dataset):
         self.files.sort()
         self.transform = transform
         self.length = len(self.files)
+        self.frame_shuffle = frame_shuffle
 
     def __len__(self):
         return self.length
@@ -166,7 +168,11 @@ class UpdraftDataset(Dataset):
     def __getitem__(self, idx):
         path = self.files[idx]
         data = pkl.load(open(path, "rb"))
-        data = random.sample(data, args.K + 1)
+        if self.frame_shuffle:
+            data = random.sample(data, args.K + 1)
+        else:
+            idxlist = np.linspace(0, len(data) - 1, args.K + 1, dtype="int")
+            data = map(data.__getitem__, idxlist)
 
         data_array = []
         for d in data:
@@ -218,7 +224,7 @@ def gen_video(video_id):
 
     MAPSIZE = args.MAPSIZE
 
-    hrlist = np.linspace(0, 300, args.FRAMENUM)  # relative heights
+    hrlist = np.linspace(30, 300, args.FRAMENUM)  # relative heights
 
     MAPSIZE = args.MAPSIZE
     # Define an identity

@@ -92,27 +92,23 @@ def meta():
             # Generate frame using landmarks from frame t
             x_t, y_t = t[:, 0, ...], t[:, 1, ...]
 
-            # Train D
-            optimizer_D.zero_grad()
-            x_hat = G(y_t, e_hat).detach()
-            r_x_hat, _ = D(x_hat, y_t, i)
-            r_x, _ = D(x_t, y_t, i)
-            loss_D = criterion_D(r_x, r_x_hat)
-            loss_D.backward()
-
-            for k, v in D.named_parameters():
-                if torch.isnan(v.grad).any():
-                    breakpoint()
-
-            optimizer_D.step()
-
-            # Train G
+            """
+            Following:
+            https://github.com/vincent-thevenin/Realistic-Neural-Talking-Head-Models/blob/e461da8dc54ed76ae9f5087c77f93f6e12a83bf0/train.py#L52
+            """
+            # Train E and G
             optimizer_E_G.zero_grad()
+            optimizer_D.zero_grad()
+
             x_hat = G(y_t, e_hat)
-            r_x_hat, _ = D(x_hat, y_t, i)
+            r_x_hat, D_hat_res_list = D(x_hat, y_t, i)
+
+            with torch.no_grad():
+                r_x, D_res_list = D(x_t, y_t, i)
+
             loss_E_G = criterion_E_G(
-                x_t, y_t, x_hat, r_x_hat, e_hat, D.W[:, i].transpose(1, 0))
-            loss_E_G.backward()
+                x_t, x_hat, r_x_hat, e_hat, D.W[:, i].transpose(1, 0))
+            loss_E_G.backward(retain_graph=False)
 
             for k, v in E.named_parameters():
                 if torch.isnan(v.grad).any():
@@ -124,14 +120,37 @@ def meta():
 
             optimizer_E_G.step()
 
-            # Optimize D again
-            x_hat = G(y_t, e_hat).detach()
-            r_x_hat, _ = D(x_hat, y_t, i)
-            r_x, _ = D(x_t, y_t, i)
-
+            # Train D
+            optimizer_E_G.zero_grad()
             optimizer_D.zero_grad()
+
+            x_hat = x_hat.detach()
+            r_x_hat, D_hat_res_list = D(x_hat, y_t, i)
+            r_x, D_res_list = D(x_t, y_t, i)
+
             loss_D = criterion_D(r_x, r_x_hat)
-            loss_D.backward()
+            loss_D.backward(retain_graph=False)
+
+            for k, v in D.named_parameters():
+                if torch.isnan(v.grad).any():
+                    breakpoint()
+
+            optimizer_D.step()
+
+            # Train D once again
+            optimizer_D.zero_grad()
+
+            x_hat.detach().requires_grad_()
+            r_x_hat, D_hat_res_list = D(x_hat, y_t, i)
+            r_x, D_res_list = D(x_t, y_t, i)
+
+            loss_D = criterion_D(r_x, r_x_hat)
+            loss_D.backward(retain_graph=False)
+
+            for k, v in D.named_parameters():
+                if torch.isnan(v.grad).any():
+                    breakpoint()
+
             optimizer_D.step()
 
             batch_end = datetime.now()

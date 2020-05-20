@@ -224,7 +224,7 @@ class Discriminator(nn.Module):
     def __init__(self, training_videos):
         super().__init__()
 
-        self.conv1 = ResidualBlockDown(args.CHANNEL * 2, 64)
+        self.conv1 = ResidualBlockDown((args.CHANNEL - 1) * 2, 64)
         self.conv2 = ResidualBlockDown(64, 128)
         self.conv3 = ResidualBlockDown(128, 256)
         self.att = SelfAttention(256)
@@ -247,6 +247,8 @@ class Discriminator(nn.Module):
         assert x.dim() == 4 and x.shape[1] == args.CHANNEL
         assert x.shape == y.shape
 
+        x = x[:, :-1, :, :]
+        y = y[:, :-1, :, :]
         x = x.to(self.device)
         y = y.to(self.device)
 

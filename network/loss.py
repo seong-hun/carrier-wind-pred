@@ -12,17 +12,19 @@ class LossEG(nn.Module):
     def __init__(self, feed_forward=True):
         super().__init__()
 
-        self.VGG_FACE_AC = VGG_Activations(
-            vgg_face(pretrained=True), [1, 6, 11, 18, 25])
-        self.VGG19_AC = VGG_Activations(
-            vgg19(pretrained=True), [1, 6, 11, 20, 29])
+        # self.VGG_FACE_AC = VGG_Activations(
+        #     vgg_face(pretrained=True), [1, 6, 11, 18, 25])
+        # self.VGG19_AC = VGG_Activations(
+        #     vgg19(pretrained=True), [1, 6, 11, 20, 29])
 
         self.match_loss = not feed_forward
 
         set_device(self)
 
     def loss_cnt(self, x, x_hat):
-        return F.l1_loss(x.reshape(-1), x_hat.reshape(-1))
+        x = x[:, :4, :, :]
+        x_hat = x_hat[:, :4, :, :]
+        return F.l2_loss(x.reshape(-1), x_hat.reshape(-1))
 
     # def loss_cnt(self, x, x_hat):
     #     IMG_NET_MEAN = torch.Tensor([
@@ -69,9 +71,8 @@ class LossEG(nn.Module):
         return F.l1_loss(
             W_i.reshape(-1), e_hat.reshape(-1)) * args.LOSS_MCH_WEIGHT
 
-    def forward(self, x, y, x_hat, r_x_hat, e_hat, W_i):
+    def forward(self, x, x_hat, r_x_hat, e_hat, W_i):
         x = x.to(self.device)
-        y = y.to(self.device)
         x_hat = x_hat.to(self.device)
         r_x_hat = r_x_hat.to(self.device)
         e_hat = e_hat.to(self.device)
