@@ -169,9 +169,8 @@ class UpdraftDataset(Dataset):
         path = self.files[idx]
         data = pkl.load(open(path, "rb"))
         if self.frame_shuffle:
-            # data = [data[0]]
-            # data.append(random.sample(data, args.K + 1))
-            data = random.sample(data, args.K + 1)
+            data = [data[0]] + random.sample(data, args.K + 1)
+            # data = random.sample(data, args.K + 1)
         else:
             idxlist = np.linspace(0, len(data) - 1, args.K + 1, dtype="int")
             data = map(data.__getitem__, idxlist)

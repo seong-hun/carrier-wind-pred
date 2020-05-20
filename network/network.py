@@ -206,7 +206,7 @@ class Generator(nn.Module):
         aux = psi[:, idx0:idx1].unsqueeze(-1)
         mean1, std1 = aux[:, 0:len1], aux[:, len1:2 * len1]
         mean2, std2 = aux[:, 2 * len1:2 * len1 + len2], aux[:, 2 * len1 + len2:]
-        return mean1, std1.abs(), mean2, std2.abs()
+        return mean1, std1, mean2, std2
 
     def define_psi_slices(self):
         out = {}
