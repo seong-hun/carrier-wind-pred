@@ -169,7 +169,7 @@ class UpdraftDataset(Dataset):
         path = self.files[idx]
         data = pkl.load(open(path, "rb"))
         if self.frame_shuffle:
-            data = [data[0]] + random.sample(data, args.K + 1)
+            data = [data[0]] + random.sample(data[1:], args.K + 1)
             # data = random.sample(data, args.K + 1)
         else:
             idxlist = np.linspace(0, len(data) - 1, args.K + 1, dtype="int")
@@ -191,7 +191,7 @@ class UpdraftDataset(Dataset):
 
 class NormHeight:
     def __init__(self):
-        self.factor = np.array([7, 7, 7, 600, 1]).reshape([-1, 1, 1])
+        self.factor = np.array([10, 10, 10, 700, 1]).reshape([-1, 1, 1])
 
     def __call__(self, image):
         return image / self.factor

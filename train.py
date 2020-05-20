@@ -175,29 +175,6 @@ def meta():
                     f"D(x) = {r_x.mean().item():.4f} "
                     f"D(x_hat) = {r_x_hat.mean().item():.4f}")
 
-            # Save
-            save_image(os.path.join(args.GENERATED_DIR, "last_result_x.pkl"),
-                       x_t[0])
-            save_image(os.path.join(args.GENERATED_DIR, "last_result_x_hat.pkl"),
-                       x_hat[0])
-
-            if (epoch + 1) % 100 == 0:
-                save_image(
-                    os.path.join(
-                        args.GENERATED_DIR,
-                        f"{datetime.now():%Y%m%d_%H%M%S%f}_x.png"),
-                    x_t[0])
-                save_image(
-                    os.path.join(
-                        args.GENERATED_DIR,
-                        f"{datetime.now():%Y%m%d_%H%M%S%f}_x_hat.png"),
-                    x_hat[0])
-
-            if (epoch + 1) % 100 == 0:
-                save_model(E, run_start)
-                save_model(G, run_start)
-                save_model(D, run_start)
-
         save_model(E, run_start)
         save_model(G, run_start)
         save_model(D, run_start)

@@ -194,7 +194,7 @@ class Generator(nn.Module):
         out = self.in1_d(self.deconv1(
             out, *self.slice_psi(psi_hat, 'deconv1')))  # [B, CHANNEL, 64, 64]
 
-        out[:, :3, ...] = torch.tanh(out[:, :3, ...]) * 1.5
+        out[:, :3, ...] = torch.tanh(out[:, :3, ...])
         out[:, 3, ...] = torch.sigmoid(out[:, 3, ...])
         # out[:, 4, ...] = torch.sigmoid(out[:, 4, ...])
 

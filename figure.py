@@ -15,7 +15,8 @@ E = network.Embedder()
 G = network.Generator()
 
 # DATANUM = "20200514_2113"
-DATANUM = "20200520_1135"
+# DATANUM = "20200520_1200"
+DATANUM = "20200520_1610"
 train.load_model(E, DATANUM)
 train.load_model(G, DATANUM)
 

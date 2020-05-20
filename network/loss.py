@@ -56,11 +56,11 @@ class LossEG(nn.Module):
             + vgg_face_loss * args.LOSS_VGG_FACE_WEIGHT)
 
         # Height loss
-        height_loss = F.l1_loss(
-            x[:, 3, ...].reshape(-1),
-            x_hat[:, 3, ...].reshape(-1)) * args.LOSS_HEIGHT_WEIGHT
+        image_loss = F.l1_loss(
+            x.reshape(-1),
+            x_hat.reshape(-1)) * args.LOSS_IMAGE_WEIGHT
 
-        return vgg_loss + height_loss
+        return vgg_loss + image_loss
 
     def loss_adv(self, r_x_hat, D_res_list, D_hat_res_list):
         loss_fm = 0
