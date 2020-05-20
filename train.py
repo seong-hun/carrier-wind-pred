@@ -22,7 +22,7 @@ def main():
         os.makedirs(args.LOG_DIR)
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         filename=os.path.join(args.LOG_DIR, f"{datetime.now():%Y%m%d}.log"),
         format="[%(asctime)s][%(levelname)s] %(message)s",
         datefmt="%H:%M:%S"
@@ -76,7 +76,7 @@ def meta():
         D.train()
 
         for batch_num, (i, video) in enumerate(dataset):
-            batch_start = datetime.now()
+            # batch_start = datetime.now()
 
             # video [B, K+1, 2, C, W, H]
             # Remove index channel from all video (CHANNEL = 4)
@@ -113,7 +113,8 @@ def meta():
                 r_x, D_res_list = D(x_t, y_t, i)
 
             loss_E_G = criterion_E_G(
-                x_t, x_hat, r_x_hat, e_hat, D.W[:, i].transpose(1, 0))
+                x_t, x_hat, r_x_hat,
+                D_res_list, D_hat_res_list, e_hat, D.W[:, i].transpose(1, 0))
             loss_E_G.backward(retain_graph=False)
 
             # for k, v in E.named_parameters():
@@ -161,16 +162,15 @@ def meta():
 
             optimizer_D.step()
 
-            batch_end = datetime.now()
-
             # Show progress
             if (batch_num + 1) % 1 == 0 or batch_num == 0:
                 logging.info(
                     f"Epoch {epoch + 1}/{args.EPOCHS}: "
                     f"[{batch_num + 1}/{len(dataset)}] | "
-                    f"Time: {batch_end - batch_start} | "
+                    f"Time: {datetime.now() - run_start} | "
                     f"Loss_E_G = {loss_E_G.item():.4f} "
-                    f"Loss_D = {loss_D.item():.4f}")
+                    f"Loss_D = {loss_D.item():.4f}"
+                )
                 logging.debug(
                     f"D(x) = {r_x.mean().item():.4f} "
                     f"D(x_hat) = {r_x_hat.mean().item():.4f}")
