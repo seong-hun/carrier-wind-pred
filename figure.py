@@ -11,12 +11,14 @@ import args
 from dataset import UpdraftDataset, ToTensor, NormHeight
 
 
+plt.rc("axes", titlesize=10)
+
 E = network.Embedder()
 G = network.Generator()
 
 # DATANUM = "20200514_2113"
-# DATANUM = "20200520_1200"
-DATANUM = "20200520_1610"
+DATANUM = "20200520_1200"
+# DATANUM = "20200520_1610"
 train.load_model(E, DATANUM)
 train.load_model(G, DATANUM)
 
@@ -53,20 +55,18 @@ for batch_num, (i, video) in enumerate(dataset):
     x_t, y_t = t[:, 0, ...], t[:, 1, ...]
     x_hat = G(y_t, e_hat)
 
-    # goodlist = range(len(x_hat))
-    goodlist = range(10)
-    # goodlist = [2, 3, 10, 18]
+    goodlist = [10, 27, 32, 43, 45, 46, 47]
 
     fig, axes = plt.subplots(
-        len(goodlist), 4, figsize=(5, 5),
-        squeeze=False, subplot_kw={"xticks": [], "yticks": []})
-    fig.subplots_adjust(hspace=0.05, wspace=0.05)
+        len(goodlist), 4,
+        figsize=(3.6, 10), subplot_kw={"xticks": [], "yticks": []})
+    fig.subplots_adjust(hspace=0.13, wspace=0.05)
 
     for i, idx in enumerate(goodlist):
-        base_img = -video[idx, 0, 0, 2, ...].detach().numpy()
-        real_img = -x_t[idx, 2, ...].detach().numpy()
-        fake_img = -x_hat[idx, 2, ...].detach().numpy()
-        landmark = -y_t[idx, 2, ...].detach().numpy()
+        base_img = -video[idx, 0, 0, 2, ...].detach().numpy() * 10
+        real_img = -x_t[idx, 2, ...].detach().numpy() * 10
+        fake_img = -x_hat[idx, 2, ...].detach().numpy() * 10
+        landmark = -y_t[idx, 2, ...].detach().numpy() * 10
 
         vmin = real_img[real_idx[i] == 1].min()
         vmax = real_img[real_idx[i] == 1].max()
@@ -74,11 +74,16 @@ for batch_num, (i, video) in enumerate(dataset):
         axes[i, 0].imshow(base_img, **kwargs)
         axes[i, 1].imshow(landmark, **kwargs)
         axes[i, 2].imshow(fake_img, **kwargs)
-        axes[i, 3].imshow(real_img, **kwargs)
+        img = axes[i, 3].imshow(real_img, **kwargs)
+
+        # axes[i, 0].set_ylabel(f"{idx}")
 
     axes[0, 0].set_title("Base")
     axes[0, 1].set_title("Landmark")
     axes[0, 2].set_title("Estimated")
     axes[0, 3].set_title("Real")
+
+    fig.colorbar(img, ax=axes, orientation="horizontal",
+                 fraction=0.03, pad=0.05)
 
     plt.show()
