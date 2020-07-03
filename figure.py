@@ -126,8 +126,8 @@ def ppt_figure():
     e_vectors = E(x, y).reshape(dims[0], dims[1], -1)  # [B, K, len(e)]
     e_hat = e_vectors.mean(dim=1)  # [B, len(e)]
 
-    x_t = real[:, 0, ...]  # True image
-    y_t = real[:, 1, ...]  # Landmark
+    x_t = real[:, 0, ...]  # True image [B, C, W, H]
+    y_t = real[:, 1, ...]  # Landmark [B, C, W, H]
 
     # Different landmark
     y_t = torch.full(x_t.shape, args.NANVALUE)  # [B, C, W, H]

@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 
 import args
 import network
+from network import vgg_face
 from dataset import UpdraftDataset, ToTensor, NormHeight
 
 
@@ -181,6 +182,44 @@ def meta():
         epoch_end = datetime.now()
         logging.info(
             f"Epoch {epoch + 1} finished in {epoch_end - epoch_start}. ")
+
+
+@main.command()
+def pretrain():
+    """
+    Pre-training the wind classifier to construct a loss function
+    """
+    run_start = datatime.now()
+    logging.info("===== PRE-TRANING =====")
+    logging.info(f"Traning using dataset located in {args.DATASET_PATH}")
+    raw_dataset = UpdraftDataset(
+        root=args.DATASET_PATH,
+        transform=transform.Compose([
+            NormHeight(),
+            ToTensor(),
+        ])
+    )
+    dataset = DataLoader(raw_dataset, batch_size=32, suffle=True)
+
+    model = vgg_face(pretrained=False)
+
+    LR = 5e-4
+    params = [
+        {"params": model.features.parameters(), "lr": LR / 10},
+        {"params": model.classifier.parameters()}
+    ]
+    optimizer = optim.Adam(params, lr=LR)
+
+    for epoch in range(2):
+        epoch_start = datetime.now()
+
+        for batch_num, (i, data) in enumerate(dataset):
+            optimizer.zero_grad()
+            y_pred, = model(x)
+            loss = criterion(y_pred, y)
+            loss.backward()
+            optimizer.step()
+
 
 
 def save_model(model, time_for_name=None):
