@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 
 import args
 import network
-from network import vgg_face
+from network.vgg import vgg_face
 from dataset import UpdraftDataset, ToTensor, NormHeight
 
 
@@ -185,23 +185,25 @@ def meta():
 
 
 @main.command()
-def pretrain():
+def pre():
     """
     Pre-training the wind classifier to construct a loss function
     """
-    run_start = datatime.now()
+    run_start = datetime.now()
     logging.info("===== PRE-TRANING =====")
     logging.info(f"Traning using dataset located in {args.DATASET_PATH}")
     raw_dataset = UpdraftDataset(
         root=args.DATASET_PATH,
-        transform=transform.Compose([
+        transform=transforms.Compose([
             NormHeight(),
             ToTensor(),
         ])
     )
-    dataset = DataLoader(raw_dataset, batch_size=32, suffle=True)
+    dataset = DataLoader(
+        raw_dataset, batch_size=args.PRE_BATCHSIZE, shuffle=True)
 
-    model = vgg_face(pretrained=False)
+    model = vgg_face(pretrained=False, in_channels=4)
+    criterion = nn.CrossEntropyLoss()
 
     LR = 5e-4
     params = [
@@ -210,16 +212,49 @@ def pretrain():
     ]
     optimizer = optim.Adam(params, lr=LR)
 
-    for epoch in range(2):
+    breakpoint()
+    logging.info(
+        f"Epochs: {args.PRE_EPOCHS} "
+        f"Batches: {len(dataset)} "
+        f"Batch Size: {args.PRE_BATCHSIZE}")
+
+    for epoch in range(args.PRE_EPOCHS):
         epoch_start = datetime.now()
 
-        for batch_num, (i, data) in enumerate(dataset):
-            optimizer.zero_grad()
-            y_pred, = model(x)
-            loss = criterion(y_pred, y)
-            loss.backward()
-            optimizer.step()
+        model.train()
 
+        for batch_num, (index, video) in enumerate(dataset):
+            # video: [B, K, 2, C+1, W, H]
+            video = video[..., 0, :args.CHANNEL, :, :]  # [B, K, C, W, H]
+            video = video.transpose(0, 1)
+
+            y = index
+
+            loss_val = 0
+            for vid in video:
+                y_pred = model(vid)
+
+                optimizer.zero_grad()
+                loss = criterion(y_pred, y)
+                loss.backward()
+                optimizer.step()
+
+                loss_val += loss.item()
+
+            # Show progress
+            if (batch_num + 1) % 1 == 0 or batch_num == 0:
+                logging.info(
+                    f"Epoch {epoch + 1}/{args.PRE_EPOCHS}: "
+                    f"[{batch_num + 1}/{len(dataset)}] | "
+                    f"Time: {datetime.now() - run_start} | "
+                    f"Loss = {loss_val/len(video):.4f} "
+                )
+
+        save_model(model, run_start)
+        epoch_end = datetime.now()
+        logging.info(
+            f"Epoch {epoch + 1} finished in {epoch_end - epoch_start}."
+        )
 
 
 def save_model(model, time_for_name=None):

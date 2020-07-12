@@ -1,7 +1,7 @@
 import os
 
-DATASET_PATH = os.path.join("data", "video")
 LOG_DIR = os.path.join("logs")
+DATASET_PATH = os.path.join("data", "video")
 GENERATED_DIR = os.path.join("data", "generated")
 MODELS_DIR = os.path.join("data", "models")
 VGG_FACE = os.path.join("src", "vgg_face_dag.pth")
@@ -25,6 +25,10 @@ FRAMENUM = 50
 # VIDEONUM = 2
 # FRAMENUM = 5
 CHANNEL = 4
+
+# Pre-Traning Hyperparameters
+PRE_EPOCHS = 50
+PRE_BATCHSIZE = 8
 
 # Training Hyperparameters
 K = 8
